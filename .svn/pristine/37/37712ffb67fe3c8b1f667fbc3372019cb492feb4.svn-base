@@ -1,0 +1,8 @@
+
+exports.youminotify = function(req,res){
+	console.log("***************有米回调开始*************");
+	console.log(req.query);
+	console.log(req.body);
+	console.log('*****************有米回调结束**********************8');
+	res.send("success");
+}

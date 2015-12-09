@@ -1,0 +1,3 @@
+module.exports = {
+    url : 'http://112.84.178.38:89/restful/obdservice.asmx?wsdl'
+}

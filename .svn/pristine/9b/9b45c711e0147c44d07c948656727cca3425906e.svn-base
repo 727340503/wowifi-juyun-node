@@ -1,0 +1,295 @@
+var soap = require('soap');
+var settings = require('../../settings');
+var Time = require('./time');
+var async = require('async');
+
+
+//alipay回调
+exports.notify = function(req,res){
+	console.log('**********************执行了支付宝异步回调*******************')
+    //获取支付宝的通知返回参数，可参考技术文档中页面跳转同步通知参数列表(以下仅供参考)//
+    var params = req.body;
+    // var params = req.query;
+    console.log(params);
+    var trade_no = params.trade_no;              //支付宝交易号
+    var order_no = params.out_trade_no;          //获取订单号
+    var total_fee = params.total_fee;            //获取总金额
+    var subject = params.subject;//商品名称、订单名称
+    var userId = params.body;
+    var url = settings.url;
+    soap.createClient(url,function(err,client){
+    	if(err){
+    		console.log(err);
+    		console.log('*******************连接远程服务器出错*******************');
+    		return res.send('fail');
+    	}	
+    	console.log('************************同步查询相关参数***********************');
+    	async.auto({
+    		qryAliPay : function(callback){//查询充值记录
+    			var qryAliPayArgs = {};
+				qryAliPayArgs.entityname = 'new_jifei_alipay';
+		        qryAliPayArgs.filter = '[{"Logical":"or","Conditions":[{"Key":"new_jifei_alipayid","Operator":"=","Value":"'+order_no+'"}]}]';
+		        qryAliPayArgs.fields = 'new_jifei_ordersum,new_jifei_paytradeno,new_jifei_result,new_jifei_alipayid,new_jifei_packageid,new_jifei_packagetempid,createdon';
+	          	qryAliPayArgs.orderby = 'createdon desc';
+		        qryAliPayArgs.pagesize = 1;
+		        qryAliPayArgs.pageindex = 1; 
+		        console.log(qryAliPayArgs);
+		        console.log('***********************查询alipay支付订单**************************');
+		        client.Query(qryAliPayArgs,function(err,result){
+		        	if(err){
+		        		console.log(err);
+		        		console.log('********************用户订单查询错误*****************');
+		        		return res.send('fail');
+		        	}
+		        	var off = null;
+		        	for(var a in result.QueryResult){
+		        		if(a){
+		        			off = true;
+		        		}
+		        	}
+		        	console.log(result);
+		        	if(off){
+		        		var alipayData = JSON.parse(result.QueryResult);
+		        		if(alipayData.issuccess != undefined || alipayData.issuccess == false){
+		        			res.send('fail');
+		        		}else{
+		        			if(alipayData[0].new_jifei_result == '未付款'){
+		        				callback(null,alipayData[0]);
+		        			}else{//如果状态为已付款，则返回支付宝成功信息
+		        				res.send('success');
+		        			}
+		        		}
+		        	}else{
+		        		res.send('fail');
+		        	}
+		        });
+    		},
+    		qryUser:['qryAliPay',function(callback,result){
+    			var userArgs = {};
+        		userArgs.entityname = "new_jifei_customer";
+        		userArgs.filter = '[{"Logical":"or","Conditions":[{"Key":"new_jifei_customerid","Operator":"=","Value":"'+userId+'"}]}]';
+		        userArgs.fields = 'new_jifei_customerid,new_type,createdon';
+	          	userArgs.orderby = 'createdon desc';
+		        userArgs.pagesize = 1;
+		        userArgs.pageindex = 1;
+		        console.log(userArgs);
+		        console.log('**********查询用户********');
+		        client.Query(userArgs,function(err,result){
+		        	if(err){
+		        		console.log(err);
+		        		console.log('*********查询用户失败**********');
+		        		return res.json({resultCode:'2',info:'用户查询失败,请稍后重试'});
+		        	}
+		        	var off = null;
+		        	console.log(result);
+		        	for(var a in result.QueryResult){
+		        		if(a){
+		        			off = true;
+		        			break;
+		        		}
+		        	}
+		        	if(off){
+		        		var userData = JSON.parse(result.QueryResult)[0];
+		        		if(userData.new_jifei_customerid && userData.new_jifei_customerid != ''){
+		        			//判断用户是否为体验用户,如果是更改为自营用户
+		        			if(userData.new_type == '1'){
+		        				var updUserArgs = {};
+								updUserArgs.entityname ='new_jifei_customer';
+								updUserArgs.data = '[{"Key":"new_jifei_customerid","Value":"'+userData.new_jifei_customerid+'"},'+
+													'{"Key":"new_type","Value":"5"}]';
+								client.Update(updUserArgs,function(err,result){
+									if(err){
+										console.log(err);
+										console.log('*****************更新用户类型出错*****************8');
+									}
+									var off = null;
+									for(var a in result.UpdateResult){
+										if(a){
+											off = true;
+											break;
+										}
+									}
+									if(off){
+										var upduserData = JSON.parse(result.UpdateResult)[0];
+										if(upduserData.issuccess){
+											console.log('****************用户改为自营成功success******************');
+										}
+									}else{
+										console.log('****************用户改为自营失败err******************');
+									}
+								});
+		        			}
+		        			callback(null,userData);
+					    }else{
+					    	return res.send('fail');
+					    }
+		        	}else{
+		        		console.log('***************用户不存在****************');
+        				return res.send('fail');
+		        	}
+		        });
+    		}],
+    		qryuserOrder:['qryAliPay','qryUser',function(callback,result){
+    			var qryOrderArgs = {};
+				qryOrderArgs.entityname = 'new_jifei_order';
+		        qryOrderArgs.filter = '[{"Logical":"or","Conditions":[{"Key":"new_jifei_customerid","Operator":"=","Value":"'+userId+'"}]}]';
+		        qryOrderArgs.fields = 'new_jifei_orderid,new_jifei_endtime,createdon';
+	          	qryOrderArgs.orderby = 'createdon desc';
+		        qryOrderArgs.pagesize = 1;
+		        qryOrderArgs.pageindex = 1; 
+		        console.log(qryOrderArgs);
+		        console.log('*******************查询用户订单**********************');
+		        client.Query(qryOrderArgs,function(err,result){
+		        	if(err){
+		        		console.log(err);
+		        		console.log('*********************查询用户订单失败************************8');
+		        		return res.send('fail');
+		        	}
+		        	var off = null
+		        	for(var a in result.QueryResult){
+		        		if(a){
+		        			off = true;
+		        		}
+		        	}
+		        	if(off){
+		        		var orderData = JSON.parse(result.QueryResult);
+		        		if(orderData.issuccess != undefined || orderData.issuccess == false){
+		        			res.send('fail');
+		        		}else{
+		        			callback(null,orderData[0]);
+		        		}
+		        	}else{
+		        		res.send('fail');
+		        	}
+		        });
+
+    		}],
+    		qryPackage : ['qryAliPay','qryUser','qryuserOrder',function(callback,result){
+    			var alipayData = result.qryAliPay;
+    			var packageId = alipayData.new_jifei_packagetempid;
+    			var qrypackArgs = {};
+				qrypackArgs.entityname = 'new_jifei_package';
+		        qrypackArgs.filter = '[{"Logical":"or","Conditions":[{"Key":"new_jifei_packageid","Operator":"=","Value":"'+packageId+'"}]}]';
+		        qrypackArgs.fields = 'new_qtymonth,createdon';
+	          	qrypackArgs.orderby = 'createdon desc';
+		        qrypackArgs.pagesize = 1;
+		        qrypackArgs.pageindex = 1;
+		        console.log(qrypackArgs);
+		        console.log('******************查询套餐信息***********************');
+		        client.Query(qrypackArgs,function(err,result){
+					if(err){
+						return res.send('fail');
+					}		        	
+					var off = null;
+					for(var a in result.QueryResult){
+						if(a){
+							off = true;
+						}
+					}
+					if(off){
+						var packData = result.QueryResult;
+						console.log(packData);
+						if(packData.issuccess != undefined || packData.issuccess == false){
+							res.send('fail');
+						}else{
+							callback(null,packData);
+						}
+					}else{
+						res.send('fail');
+					}
+		        });
+    		}]
+    	},function(err,results){
+    		if(err){
+    			console.log('发生了错误');
+    			return res.send('fail');
+    		}
+    		console.log('**********************查询完毕开始处理alipay回调******************');
+    		var aipayData = results.qryAliPay;
+    		var userData = results.qryUser;
+    		var orderData = results.qryuserOrder;
+    		var packData = JSON.parse(results.qryPackage)[0];
+    		var sum = aipayData.new_jifei_ordersum;
+    		// if(sum != total_fee){//判断总价是否正确
+    		// 	console.log('****************价格不符*******************');
+    		// 	return res.send('fail');
+    		// }
+    		var num = parseInt(aipayData.new_jifei_ordersum);
+    		var month = parseInt(packData.new_qtymonth);
+    		var endTime = new Date(orderData.new_jifei_endtime).getTime();
+    		var now = new Date().getTime();
+    		var endDate = '';
+    		if(now >= endTime){//判断结束时间是否大于当前时间
+    			endTime = now;
+    		}
+    		for(var i=0; i<num; i++){
+    			endTime = new Date(endTime);
+    			var endTime1 = new Date(endTime.getFullYear(), (endTime.getMonth()) + month, endTime.getDate(), endTime.getHours(), endTime.getMinutes(), endTime.getSeconds());
+				endDate = Time.format(endTime1.toLocaleString(),'yyyy-MM-dd HH:mm:ss');
+				endTime = new Date(endDate).getTime();
+    		}
+    		var updAlipayArgs = {};
+    		updAlipayArgs.entityname ='new_jifei_alipay';
+			updAlipayArgs.data =  '[{"Key":"new_jifei_alipayid","Value":"'+order_no+'"},'+
+								  '{"Key":"new_jifei_paytradeno","Value":"'+trade_no+'"},'+
+								  '{"Key":"new_jifei_addtime","Value":"'+Time.format(new Date().toLocaleString(),'yyyy-MM-dd HH:mm:ss')+'"},'+
+								  '{"Key":"new_jifei_validtime","Value":"'+endDate+'"},'+
+								  '{"Key":"new_jifei_result","Value":"success"}]';
+			console.log(updAlipayArgs);
+			console.log('******************修改支付订单状态******************');
+			client.Update(updAlipayArgs,function(err,result){
+				if(err){
+					console.log(err);
+					console.log('******************修改支付订单状态出错****************');
+					return res.send('fail');
+				}
+				var off = null;
+				for(var a in result.UpdateResult){
+					if(a){
+						off = true;
+					}
+				}
+				console.log(result);
+				if(off){
+					var updalipayData = JSON.parse(result.UpdateResult);
+					if(updalipayData.issuccess){
+						res.send('success');
+						console.log('***********修改支付订单状态成功*************');
+						var updOrderArgs = {};
+						updOrderArgs.entityname ='new_jifei_order';
+						updOrderArgs.data = '[{"Key":"new_jifei_orderid","Value":"'+orderData.new_jifei_orderid+'"},'+
+											'{"Key":"new_jifei_endtime","Value":"'+endDate+'"}]';
+						console.log(updOrderArgs);
+						console.log('************************开始更新用户订单上网截止日*******************');
+						client.Update(updOrderArgs,function(err,result){
+							if(err){
+								console.log('******************用户订单表更新失败*****************');
+								console.log(err);
+							}
+							var off = null;
+							for(var a in result.UpdateResult){
+								if(a){
+									off = true;
+									break;
+								}
+							}
+							console.log(result);
+							if(off){
+								var orderUpdData = JSON.parse(result.UpdateResult);
+								if(orderUpdData.issuccess){
+									console.log('*****************alipay订单充值成功****************');
+								}
+							}
+						})
+					}else{
+						res.send('fail');
+					}
+				}else{
+					res.send('fail');
+				}
+			});
+    	});
+    });
+}
+
+

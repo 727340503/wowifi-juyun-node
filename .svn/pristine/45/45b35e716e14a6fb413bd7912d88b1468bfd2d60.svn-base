@@ -1,0 +1,78 @@
+var settings = require('../../settings');
+var http = require('http');  
+var request = require('request');
+var nodegrass = require('nodegrass');
+var Time = require('../controller/time');
+var soap = require('soap');
+//发送短信验证码
+exports.sendMsg = function(req,res){
+	// var data = req.body;
+	var data = req.query;
+	try{
+		var phone = data.phone;//发送的手机号
+		var code = data.code;//发送的验证码
+		if(!phone || phone == ''){
+			return res.json({resultCode:'1',info:'手机号不能为空'});
+		}
+		if(!code || code == ''){
+			return res.json({resultCode:'1',info:'验证码不能为空'});
+		}
+		var smsmsg_url = settings.SMSMESSAGE_URL;//请求的短信服务器地址
+		var userid = settings.SMSMESSAGE_USERID;//用户id
+		var password = settings.SMSMESSAGE_PASSWORD;//密码
+		var path = settings.SMSMESSAGE_PATH;//请求的路径
+		var port = settings.SMSMESSAGE_port;//请求的端口号
+		var content = "%E4%BD%A0%E7%9A%84%E9%AA%8C%E8%AF%81%E7%A0%81%E4%B8%BA"+code+"%E3%80%90%E6%97%A0%E7%BA%BF%E7%BD%91%E7%BB%9C%E3%80%91";
+		console.log('*****************发送短信验证码*****************');
+		var url =  "http://"+smsmsg_url+":"+port+path+"?userId="+userid+"&password="+password+"&mobile="+phone+"&content="+content;
+		console.log(url);
+		nodegrass.get(url,function(data,status,headers){
+			var resultcode = data.substring(data.indexOf("rspCode")+8,data.indexOf("&rspDesc"));
+			console.log(resultcode);
+            if(resultcode == 0){
+            	res.json({resultCode:'0',info:'短信发送成功，请注意接收'});
+            	var URL = settings.url;
+            	soap.createClient(URL,function(err,client){
+            		if(err){
+            			console.log(err);
+            			return;
+            		}
+	            	var args = {};
+	            	args.entityname = "new_jifei_sendsms";
+	            	args.data = '[{"Key":"new_cs","Value":1},'+
+								 '{"Key":"new_datetime","Value":"'+Time.format(new Date().toLocaleString(),'yyyy-MM-dd HH:mm:ss')+'"},'+
+								 '{"Key":"new_phone","Value":"'+phone+'"},'+
+								 '{"Key":"new_smscontent","Value":"WOWIFI  APP:  '+code+'"},'+
+								 '{"Key":"new_success","Value":"success"}'+
+								 ']';
+					client.Create(args,function(err,result){
+						if(err){
+							console.log(err);
+							return;
+						}
+						var off = null;
+						for(var a in result.CreateQuery){
+							if(a){
+								off = true;
+								break;
+							}
+						}
+						console.log(result);
+						if(off){
+							console.log('****************短信日志打印成功*********************');							
+						}
+					});
+            	});
+
+ 
+            }else{
+            	res.json({resultCode:'1',info:'发送失败,请重试'});
+            }
+        },'gbk').on('error', function(e) {
+            res.json({resultCode:'1',info:'发送失败,请重试'});
+        });
+	}catch(e){
+		console.log(e);
+		res.json({resultCode:'2',info:'服务器繁忙，请稍后重试'});
+	}
+}

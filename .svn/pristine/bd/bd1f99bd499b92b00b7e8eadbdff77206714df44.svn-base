@@ -1,0 +1,33 @@
+var Alipay = require('../app/controller/alipay');
+var Order = require('../app/controller/order');
+var Factory = require('../app/controller/factory');
+var Card = require('../app/controller/cardpay');
+
+
+module.exports = function(app){
+
+    
+    //webservice 跨域请求
+    app.get('/order/webcardRech',Card.webcardRech);
+    //卡密兑换接口
+    app.post('/order/cardRech', Card.cardRech);
+    //生成alipay的订单
+    app.post('/order/createOrder',Order.createOrder);
+    //获取工厂套餐
+    app.post('/order/findFacPlans', Factory.findFacPack);
+    //查询用户订单信息
+    app.post('/order/finduserorder', Order.findAllOrder);
+    //更新用户工厂信息接口
+    app.post('/order/updAccountFac', Factory.updAccountFacId);
+
+    //alipay支付回调
+    app.post('/order/alipay_notify',Alipay.notify);
+    // app.get('/order/alipay_notify',Order.notify);
+
+
+
+    /*联通数据互通接口*/
+    app.post('/corp', Qiye.corp) 
+    app.post('/staf', Qiye.staff) 
+
+}

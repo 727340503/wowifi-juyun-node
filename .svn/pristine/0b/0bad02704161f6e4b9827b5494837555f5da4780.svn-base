@@ -1,0 +1,177 @@
+var soap = require('soap');
+var settings = require('../../settings');
+var Time = require('./time');
+
+
+//用户签到
+exports.sign = function(req,res){
+	var data = req.body;
+	// var data  = req.query;
+	try{
+		var userid = data.userid;
+		if(!userid || userid == ''){
+			return res.json({resultCode:'1',info:'用户不能为空'});
+		}
+		var url = settings.url;
+		console.log(url);
+		soap.createClient(url,function(err,client){
+			if(err){
+				console.log(err);
+				console.log('*****************远程连接异常***************');
+				return res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+			}
+			var nowDate = Time.format(new Date(),'yyyy/MM/dd');
+			var args = {};
+			args.entityname = "new_jifei_checkin";
+        	args.filter = '[{"Logical":"and","Conditions":[{"Key":"new_jifei_customerid","Operator":"=","Value":"'+userid+'"},{"Key":"new_date","Operator":"=","Value":"'+nowDate+'"}]}]';
+	        args.fields = 'new_jifei_checkinid,new_date,createdon';
+          	args.orderby = 'createdon desc';
+	        args.pagesize = 1;
+	        args.pageindex = 1;
+        	console.log(args);
+        	console.log('********************开始查询用户是否签到****************');
+        	client.Query(args,function(err,result){
+        		if(err){
+        			console.log(err);
+        			console.log('*****************查询签到历史失败*****************');
+        			return res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+        		}
+        		var off = true;
+        		for(var a in result.QueryResult){
+        			if(a){
+        				off = false;
+        				break;
+        			}
+        		}
+        		console.log(result);
+        		if(off){//判断是否已经签到
+        			var createArgs = {};
+    				createArgs.entityname ='new_jifei_checkin';
+    				
+        			createArgs.data =  '[{"Key":"new_jifei_customerid","Value":"'+userid+'"},'+
+        								'{"Key":"new_type","Value":1},'+
+        								'{"Key":"new_date","Value":"'+Time.format(new Date(),'yyyy-MM-dd')+'"}]';
+        			console.log(createArgs);
+        			client.Create(createArgs,function(err,result){
+        				if(err){
+        					console.log(err);
+        					console.log('****************插入签到表错误****************');
+        					return res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+        				}
+        				var off = null;
+        				for(var a in result.CreateResult){
+        					if(a){
+        						off = true;
+        						break;
+        					}
+        				}
+        				console.log(result);
+        				if(off){
+        					var data = JSON.parse(result.CreateResult);
+        					if(data.issuccess){
+        						res.json({resultCode:'0',info:'签到成功'});
+        					}else{
+        						res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+        					}
+        				}
+        			});
+        		}else{
+        			var qrydata = JSON.parse(result.QueryResult);
+        			if(qrydata.issuccess != undefined || qrydata.issuccess == false){
+        				return res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+        			}
+        			return res.json({resultCode:'2',info:'对不起,您今天已经签到'});
+        		}
+        	});
+		});
+	}catch(e){
+		console.log(e);
+		res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+	}
+}
+
+//查询用户积分
+exports.userIntegral = function(req,res){
+	// var data = req.query;
+	var data = req.body;
+	try{
+		var userid = data.userid;
+		if(!userid || userid == ''){
+			return res.json({resultCode:'1',info:'用户不能为空'});
+		}
+		var url = settings.CRMSERVICE_WSDL;
+		soap.createClient(url,function(err,client){
+			if(err){
+				console.log(err);
+				console.log('*****************连接失败*******************');
+				return res.json({resultCode:'1',info:'连接异常,请稍后重试'});
+			}
+			var args = {};
+			args.entityname = "new_jifei_customer";
+			args.filter = '[{"Key":"new_jifei_customerid","Value":"'+userid+'"}]';
+	        args.fields = 'new_kyintegral,new_integral,new_djintegral';
+	        client.Query(args,function(err,result){
+	        	if(err){
+	        		console.log(err);
+	        		console.log('*************查询出错****************');
+	        		return res.json({resultCode:'1',info:'查询失败,请稍后重试'});
+	        	}
+	        	var off = null;
+	        	for(var a in result.QueryResult){
+	        		if(a){
+	        			off = true;
+	        			break;
+	        		}
+	        	}
+	        	console.log(result);
+	        	if(off){
+	        		var qryData = JSON.parse(result.QueryResult);
+	        		if(qryData.issuccess != undefined || qryData.issuccess == false){
+	        			return res.json({resultCode:'1',info:'查询失败,请稍后重试'});
+	        		}
+	        		res.json({resultCode:'0',info:'',data:qryData[0]});
+	        	}
+	        });
+		});
+	}catch(e){
+		console.log(e);
+		console.log('****************处理数据出错***************');
+		res.json({resultCode:'1',info:'查询失败,请稍后重试'});
+	}
+}
+
+//查询用户当月签到历史
+exports.userSigns = function(req,res){
+	var data = req.body;
+	try{
+		var userId = data.userId;
+		var startDate = data.startDate;
+		var stopDate = data.stopDate;
+		if(!userId || userId == ''){
+			return res.json({resultCode:'1',info:'用户不能为空'});
+		}
+		if(!startDate || startDate == ''){
+			return res.json({resultCode:'1',info:'开始时间不能为空'});
+		}
+		if(!stopDate || stopDate == ''){
+			return res.json({resultCode:'1',info:'结束时间不能为空'});
+		}
+		var url = settings.url;
+		soap.createClient(url,function(err,client){
+			if(err){
+				console.log(err);
+				return res.json({resultCode:'1',info:'远程连接异常,请稍后重试'});
+			}
+			var start = Time.format(new Date(startDate),'yyyy/MM/dd');
+			var stop = Time.format(new Date(stopDate),'yyyy/MM/dd');
+			var args = {};
+			args.entityname = "new_jifei_checkin";
+			args.filter = "";
+		});
+	}catch(e){
+		console.log(e);
+		console.log('*********************处理数据出错**********************');
+		res.json({resultCode:'1',info:'查询失败,请稍后重试'});
+	}
+}
+

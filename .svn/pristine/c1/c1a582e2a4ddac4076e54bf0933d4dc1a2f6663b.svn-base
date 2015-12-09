@@ -1,0 +1,122 @@
+// var Index = require('../app/controller/index');
+// var Phone = require('../app/controller/phone');
+// var news = require('../app/controller/news');
+var Order = require('../app/controller/order');
+// var User = require('../app/controller/user');
+// var synchroadata = require('../app/controller/synchrodata');
+// var Ucenter = require('../app/controller/ucenter');
+// var Alipay = require('../app/controller/alipay');
+// var WeiChartPay = require('../app/controller/weichartpay');
+// var Partners = require('../app/controller/partners');
+
+
+module.exports = function(app){
+
+//     //判断用户是否登录
+//     app.use(function(req, res, next){
+//         var _user = req.session.user
+//         app.locals.user = _user
+//         return next();
+//     })
+    
+    //订单相关
+    app.get('/order/finduserorder',Order.findAllOrder);
+    app.get('/order/updAccountFac',Order.updAccountFacId);
+
+
+
+// /*支付功能路由*/
+//     //创建订单
+//     app.post('/order/createOrder', Order.createOrder);
+//     // app.post('/order/topup', Order.topup);
+//     app.post('/order/gettraffic', Order.gettraffic);
+//     app.post('/order/delOrder', User.signinRequired, Order.editOrder);
+//     app.post('/order/cancelOrder', User.signinRequired, Order.cancelOrder);
+//     app.post('/order/qryOrder', User.signinRequired, Order.findOrder);
+//     app.post('/order/qryOrderStatu', Order.qryOrderStatu);
+//     app.post('/order/orderDetail', User.signinRequired, Order.detail);
+//     app.post('/order/convertinfo', User.signinRequired, Order.convertinfo);
+//     //第一次加载订单
+//     app.post('/order/firstFindOrder', User.signinRequired, Order.firstFindOrder);
+//     //分页查询订单
+//     app.post('/order/pagefindorder',User.signinRequired,Order.pageFindOrder);
+//     // app.get('/order/generate', Order.generate);
+// /*阿里支付路由*/
+//     //支付成功后跳转
+//     app.get('/order/payreturn', Alipay.payreturn);
+//     app.get('/order/success', Ucenter.success);
+//     app.post('/order/paynotify', Alipay.paynotify);
+
+// /*手机验证相关功能*/
+//     app.post('/phone/phoneform', Phone.phoneform);
+//     app.post('/phone/userform', Phone.userform);
+//     app.post('/phone/phone', Phone.phone);
+
+
+// /*用户相关功能*/
+//     //注册
+//     app.post('/user/reg', User.reg);
+//     //登录
+//     app.post('/user/login/loginform', User.loginform);
+//     //修改密码
+//     app.post('/user/editpwd', User.signinRequired, User.editpwd)
+//     //获取用户信息
+//     app.post('/user/userinfo', User.signinRequired, User.userinfo)
+//     //更新用户
+//     app.post('/user/update', User.signinRequired, User.update)
+//     //登出
+//     app.get('/user/logout', User.signinRequired, User.logout);
+//     //找回密码验证码
+//     // app.post('/user/forget/forgetform', User.forgetform);
+
+
+// /*页面路由*/
+//     //主页
+//     app.get('/', Index.index)
+//     //推广连接
+//     app.get('/u/', Index.u_index);
+//     //商务合作
+//     app.get('/cooperation', Ucenter.cooperation);
+//     //客服中心
+//     app.get('/customer', Ucenter.customer);
+//     //登录页面
+//     app.get('/login', Ucenter.login);
+//     //注册页面
+//     app.get('/regist', Ucenter.regist);
+//     //修改密码
+//     app.get('/changpwd', User.signinRequired, Ucenter.changePwd);
+//     //用户信息
+//     app.get('/userinfo', User.signinRequired,Ucenter.userinfo);
+//     //详细页面
+//     app.get('/order/detail', User.signinRequired, Ucenter.detail);
+//     //获取openid
+//     app.get('/outh2',Index.outh2);
+//     app.post('/auth/weicahrtNotify', WeiChartPay.weiChartNotify);
+
+//     //同步数据库
+//     app.get('/sync', synchroadata.sync);
+//     app.get('/pagesync',synchroadata.pagesync);
+
+
+// /*合作站点奖励*/
+//     //页面跳转app奖励发放页面
+//     app.get('/app/active',Ucenter.active);
+//     //页面跳转奖励充值页面
+//     app.get('/app/convertPresent',Ucenter.present);
+//     //判断用户是否可以获取奖励
+//     app.post('/app/present',Partners.grantPrize);
+//     //获取用户已经获取的奖励的卡号密码
+//     app.post('/app/findUserPrize',Partners.findUserPrize);
+
+
+
+//     //错误页面
+//     app.get('/err/:err',function(req, res){
+//         var err = req.param('err')
+//         res.render('err',{
+//             title: 'imooc 错误页面',
+//             err: err
+//         })
+//     })
+
+}

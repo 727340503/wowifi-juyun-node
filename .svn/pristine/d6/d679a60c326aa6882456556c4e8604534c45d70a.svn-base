@@ -1,0 +1,146 @@
+var Time = require('../controller/time');
+var settings = require('../../settings'); 
+
+exports.createUser = function(data,cb){
+    var client = data.client;
+    var user = data.user;
+    var channelNO = data.channel;
+    var password = data.password;
+    var filter = '{"Key":"new_accountno","Value":"'+user+'"},{"Key":"new_pwd","Value":"'+password+'"},{"Key":"new_name","Value":"'+user+'"},{"Key":"new_status","Value":1}';
+    if(channelNO != null && channelNO != ''){   
+        filter += '{"Key":"new_qudao","Value":"'+channelNO+'"}';
+    }
+    var args = {};
+    args.data = '['+filter+']';
+    client.Create(args,function(err,result){
+        if(err){
+            return cb(err,null);
+        }
+        var off = null;
+        for(var a in result.QueryResult){
+            if(a){
+                off = true;
+                break;
+            }
+        }
+        if(off){
+            var resultData = JSON.parse(result.CreateResult);
+            if(resultData.issuccess){
+                cb(null,true);
+            }else{
+                cb('新增用户失败',false);
+            }
+        }e
+    });
+}
+
+
+//查询29服务器用户
+exports.qryAppUser = function(data,cb){	
+	var client = data.client;
+	var user = data.user;
+	var args = {};
+	args.entityname = 'new_jyuser';
+	args.filter = '[{"Logical":"and","Conditions":[{"Key":"new_accountno","Operator":"=","Value":"'+user+'"}]}]';
+    args.fields = 'new_jyuserid,new_pwd,new_sidename,new_userphoto,new_accountno,createdon';
+  	args.orderby = 'createdon desc';
+    args.pagesize = 1;
+    args.pageindex = 1;
+    console.log(args);
+    console.log('**************************开始查询用户*************************8');
+    client.Query(args,function(err,result){
+    	if(err){
+    		return cb(err,null);
+    	}
+    	var off = null;
+    	for(var a in result.QueryResult){
+    		if(a){
+    			off = true;
+    			break;
+    		}
+    	}
+    	console.log(result);
+    	console.log('***********************查询29用户结果*****************************8');
+    	if(off){
+    		var userInfoData = JSON.parse(result.QueryResult);
+    		if(userInfoData.issuccess != undefined || userInfoData.issuccess == false){
+    			cb('查询失败',null);
+    		}else{
+    			cb(null,userInfoData[0]);
+    		}
+    	}else{
+    		cb(null,null);
+    	}
+    });
+}
+
+
+//更新29用户
+exports.updAppUser = function(data,cb){
+    var client = data.client;
+    var userId = data.userId;
+    var password = data.pwd;
+    var args = {};
+    args.entityname = 'new_jyuser';
+    args.data = '[{"Key":"new_jyuserid","Value":"'+userId+'"},'+
+                '{"Key":"new_pwd","Value":"'+password+'"}]';
+    client.Update(args,function(err,result){
+        if(err){
+            return cb(err,false);
+        }
+        var off = null;
+        for(var a in result.UpdateResult){
+            if(a){
+                off = true;
+                break;
+            }
+        }
+        if(off){
+            var updData = JSON.parse(result.UpdateResult);
+            if(updData.issuccess){
+                cb(null,true);
+            }else{
+                cb('更新失败',false);
+            }
+        }else{
+            cb(null,false);
+        }
+    });
+}
+
+
+exports.qryAdvert = function(data,cb){
+    var client = data.client;
+    var advertType = data.advertType;
+    var pagesize = data.pagesize;
+    var page = data.page;
+    var args = {};
+    args.entityname = 'new_guanggaowei';
+    args.filter = '[{"Logical":"and","Conditions":[{"Key":"new_weizhi","Operator":"=","Value":"'+advertType+'"}]}]';
+    args.fields = 'new_guanggaoweiid,new_name,new_tupian,new_weizhi,new_lianjie,createdon';
+    args.orderby = 'createdon desc';
+    args.pagesize = pagesize;
+    args.pageindex = page;
+    client.Query(args,function(err,result){
+        if(err){
+            return cb(err,null);
+        }
+        var off = null;
+        for(var a in result.QueryResult){
+            if(a){
+                off = true;
+                break;
+            }
+        }
+        if(off){
+            var resultData = JSON.parse(result.QueryResult);
+            if(resultData.issuccess != undefined || resultData == false){
+                cb('查询出错',null);
+            }else{
+                cb(null,resultData);
+            }
+        }else{
+            cb(null,null);
+        }
+    });
+}

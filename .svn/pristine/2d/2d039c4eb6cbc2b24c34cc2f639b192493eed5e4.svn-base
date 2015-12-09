@@ -1,0 +1,526 @@
+var soap = require('soap'); 
+// var nodegrass = require('nodegrass'); 
+var settings = require('../../settings'); 
+var time = require('./time');
+var LTUtil = require('../util/xrmLTutil');
+var soap = require('soap');
+var settings = require('../../settings');
+var async = require('async');
+
+//新增企业信息
+exports.corp= function(req, res) {
+  var factoryname = req.body.CORPNAME; 
+  var url = settings.CRMSERVICE_WSDL; 
+  console.log(req.url);
+  console.log(req.body);
+  //订购
+  if(factoryname==''){
+    return;
+  }
+  if(req.body.OPTYPE==1){
+    soap.createClient(url,function(err,client){
+        var off = null;
+        var args = {};
+        args.entityname = 'new_jifei_factory';
+        args.fields = 'new_jifei_factoryname,new_jifei_factoryid';//createdon, 
+        args.filter = '[{"Key":"new_jifei_factoryname","Value":"'+factoryname+'"}]';
+        console.log(args)
+        client.Query(args,function(err,result){
+            var off = null;
+            for(a in result.QueryResult){
+                if(a){
+                    off = true;
+                }
+            }
+            //不存在，则新增企业信息
+            if(off == null){
+                var args = {};
+                args.entityname = 'new_jifei_factory';
+                args.data = '[{"Key":"new_jifei_factoryname","Value":"'+factoryname+'"},'+
+                            '{"Key":"new_jifei_factionoper","Value":1}]';
+                client.Create(args,function(err,result){
+                    if(err){
+                        var _err = {'issuccess':false,'data':'抱歉，服务器发生错误！'}
+                        res.send(_err);
+                    }
+                    for(a in result.CreateResult){
+                        if(a){
+                            off = true;
+                        }
+                    }
+                    if(off){  
+                        var data = JSON.parse(result.CreateResult);
+                        console.log(data)
+                        res.send(data); 
+                    }else{
+                        var _err = {'issuccess':false,'data':'抱歉，提交失败！'}
+                        res.send(_err);  
+                    }
+                })
+            }else{
+                var data = JSON.parse(result.QueryResult);
+                data.issuccess = true;
+                console.log(data)
+                res.send(data);
+            }
+        })
+    }) 
+  }else{
+    var _err = {'issuccess':false,'data':'抱歉，提交失败！'};
+    res.send(_err);
+  }
+}
+
+
+//新增账号、订单
+exports.staff = function(req, res) {
+    // var factoryname = req.query.CORPNAME; 
+    // var url = settings.CRMSERVICE_WSDL; 
+    // var params = req.query;//获取请求参数
+
+    var factoryname = req.body.CORPNAME; 
+    var url = settings.CRMSERVICE_WSDL; 
+    var params = req.body;//获取请求参数
+    console.log(req.url)
+    console.log(req.query)
+    soap.createClient(url,function(err,client){
+        //查询企业信息
+        var args = {};
+        args.entityname = 'new_jifei_factory';
+        args.filter = '[{"Key":"new_jifei_factoryname","Value":"'+factoryname+'"}]';
+        args.fields = 'new_jifei_factoryname,new_jifei_factoryid';//createdon, 
+        client.Query(args,function(err,result){
+            var off = null;
+            for(a in result.QueryResult){
+                if(a){
+                    off = true;
+                }
+            }
+            console.log('**************用户企业信息结果****************');
+            // console.log(result);
+            if(off){
+                var resultData = JSON.parse(result.QueryResult);
+                if(resultData.issuccess != undefined || resultData.issuccess == false){
+                    return res.send({'issuccess':false,'data':'对不起,用户企业信息不存在'});
+                }
+                var userInfoObj = null;
+                var orderInfoObj = null;
+                async.auto({
+                    qryUserInfo : function(callback){//查询用户个人信息
+                        var qryData = {};
+                        qryData.client = client;
+                        qryData.STAFF_MOBILE = params.STAFF_MOBILE;
+                        LTUtil.getUserInfo(qryData,function(userInfo){//查询用户信息 
+                            //判断用户是否存在
+                            if(userInfo.resultCode == 0){//用户存在，则继续下一步
+                                userInfoObj = userInfo.data;
+                                callback(null,userInfo.data);
+                            }else{//如果用户不存在，则创建用户
+                                //创建用户
+                                if(params.OPTYPE != 1){//判断用户是订购还是退订,如果是退订,可以返回信息给请求方
+                                    return res.send({'issuccess':false,'data':'对不起,该用户不存在'});
+                                }
+                                var createData = {};
+                                createData.STAFF_MOBILE = params.STAFF_MOBILE;
+                                createData.factoryId = resultData[0].new_jifei_factoryid;
+                                createData.user = params.STAFF_USERACCOUNT;
+                                createData.client = client;
+                                LTUtil.createUser(createData,function(data){
+                                    if(data.resultCode == 0){
+                                        userInfoObj = data;
+                                        callback(null,data);
+                                    }else{//如果用户创建失败，则是直接返回失败信息
+                                        return res.send({'issuccess':false,'data':'对不起,创建用户失败,请稍后重试'});
+                                    }
+                                });  
+                            }
+                        });
+                    },
+                    qryUserOrder: ['qryUserInfo',function(callback,result){
+                        userId = userInfoObj.new_jifei_customerid;
+                        var qryData = {};
+                        qryData.userId = userId;
+                        qryData.client = client;
+                        LTUtil.qryOrder(qryData,function(orderInfo){
+                            if(orderInfo.resultCode == 0){//如果用户订单存在，则继续下一步
+                                orderInfoObj = orderInfo.data;
+                                callback(null,orderInfoObj);
+                            }else{//如果用户订单不存在,则为用户创建失效订单,生效时间由xrm数据库去处理
+                                //创建用户创建失效订单
+                                if(params.OPTYPE != 1){//判断用户是订购还是退订,如果是退订,可以返回信息给请求方
+                                    return res.send({'issuccess':false,'data':'对不起,该用户的订单不存在'});
+                                }
+                                var createData = {};
+                                createData.client = client;
+                                var num = 1;
+                                createData.num = num;//暂时定为一个
+                                createData.money = settings.LT_PRICE*num;
+                                LTUtil.createInvalidOrder(createData,function(data){
+                                    if(data.resultCode == 0){
+                                        orderInfoObj = data.data;
+                                        callback(null,data.data);
+                                    }else{
+                                        return res.send({'issuccess':false,'data':'用户创建订单失败,请稍候重试'});
+                                    }
+                                });
+                            }
+                        });
+                    }]
+                },function(err,results){
+                    console.log(orderInfoObj);
+                    console.log(userInfoObj);
+                    var url2 = settings.url;
+                    soap.createClient(url2,function(err,client2){
+                        if(err){
+                            console.log(err);
+                            console.log('*****************二次连接出错***************');
+                            return res.send({'issuccess':false,'data':'用户更新订单失败,请重试'});
+                        }
+                        if(params.OPTYPE == 1){//用户订购
+                            if(userInfoObj.statecode == 2){
+                                //判断用户状态是否属于禁用,如果是更改状态为可用
+                                var updUserData = {};
+                                updUserData.state = 0;
+                                updUserData.userInfoObj = userInfoObj;
+                                LTUtil.editUserState(updUserData,function(flag){
+                                    if(!flag){
+                                        return res.send({'issuccess':false,'data':'用户订购失败'});
+                                    }
+                                });
+                            }
+                            var createLTOrderArgs = {};
+                            createLTOrderArgs.client = client;
+                            createLTOrderArgs.client2 = client2;
+                            createLTOrderArgs.num = 12;
+                            createLTOrderArgs.factoryId = resultData[0].new_jifei_factoryid;
+                            createLTOrderArgs.mobile = params.STAFF_MOBILE;
+                            createLTOrderArgs.userId = userInfoObj.new_jifei_customerid;
+                            createLTOrderArgs.endTime = orderInfoObj.new_jifei_endtime;
+                            createLTOrderArgs.price = settings.LT_PRICE;
+                            LTUtil.createLTOrder(createLTOrderArgs,function(flag){
+                                if(flag){
+                                    res.send({'issuccess':true,'data':'用户订购成功'});
+                                }else{
+                                    res.send({'issuccess':false,'data':'用户更新订单失败,请重试'});
+                                }
+                            });
+                        }else if(params.OPTYPE == 5){//用户退定
+                            var userstatecode = userInfoObj.statecode;
+                            if(userstatecode == "1"){
+                                return res.send({'issuccess':false,'data':'该用户已经退订'});
+                            }
+                            var updUserArgs = {};
+                            updUserArgs.entityname ='new_jifei_customer';
+                            updUserArgs.data = '[{"Key":"new_jifei_customerid","Value":"'+userInfoObj.new_jifei_customerid+'"},'+
+                                                // '{"Key":"statuscode","Value":1},'+
+                                                '{"Key":"new_statecode","Value":"1"}]';//修改用户状态的字段
+                            console.log(updUserArgs);
+                            client2.Update(updUserArgs,function(err,result){
+                                if(err){
+                                    console.log(err);
+                                    console.log('*****************修改用户状态出错*****************8');
+                                }
+                                var off = null;
+                                for(var a in result.UpdateResult){
+                                    if(a){
+                                        off = true;
+                                        break;
+                                    }
+                                }
+                                console.log(result);
+                                if(off){
+                                    var updData = JSON.parse(result.UpdateResult);
+                                    if(updData.issuccess){
+                                         res.send({'issuccess':true,'data':'用户退订成功'});
+                                    }else{
+                                        res.send({'issuccess':false,'data':'用户退订失败'});
+                                    }
+                                }else{
+                                    res.send({'issuccess':false,'data':'用户退订失败'});
+                                }
+                            });
+                        }else{//未知请求
+                            res.send({'issuccess':false,'data':'未知请求'});
+                        }
+                    });
+                });
+            }else{
+                res.send({'issuccess':false,'data':'对不起,用户企业信息不存在'});
+            }
+        });
+    });
+}
+
+
+
+
+
+// var getCustomer = function(req, res,client,req_body,useraccount,new_jifei_factoryid){
+//     var off = null;
+//     var ret = '';
+//     var args = {};
+//     args.entityname = 'new_jifei_customer';
+//     args.fields = 'new_useraccount,new_jifei_customerid';//createdon, 
+//     args.filter = '[{"Key":"new_useraccount","Value":"'+useraccount+'"}]';
+//     console.log(args)
+//     client.Query(args,function(err,result){
+//         var off = null;
+//         for(a in result.QueryResult){
+//             if(a){
+//                 off = true;
+//             }
+//         }
+
+//         //不存在，则新增账号管理
+//         if(off == null){
+//             var args = {};
+//             args.entityname = 'new_jifei_customer';
+//             args.data = '['+
+//             '{"Key":"new_useraccount","Value":"'+useraccount+'"},'+
+//             '{"Key":"new_jifei_factoryid","Value":"'+new_jifei_factoryid+'"},'+
+//             '{"Key":"new_userphone","Value":"'+req_body.STAFF_MOBILE+'"},'+
+//             '{"Key":"new_username","Value":"'+req_body.STAFF_MOBILE+'"},'+
+//             '{"Key":"new_userfullname","Value":"'+req_body.STAFF_MOBILE+'"},'+
+//             '{"Key":"new_userpssword","Value":"123456"},'+
+//             '{"Key":"new_userpssword2","Value":"123456"},'+
+//             // '{"Key":"new_updatetime","Value":"'+req.body.TIMESTAMP+'"},'+
+//             ']';
+//             console.log(args);
+//             // return;          
+//             client.Create(args,function(err,result){
+//                 if(err){
+//                     ret = {'issuccess':false,'data':'抱歉，服务器发生错误！'} 
+//                     return ret;
+//                 }
+//                 for(a in result.CreateResult){
+//                     if(a){
+//                         off = true;
+//                     }
+//                 }
+//                 if(off){  
+//                     var ret = JSON.parse(result.CreateResult);
+//                     ret = ret.extra
+//                     console.log(ret) 
+//                     setOrder(req, res,client,req_body.STAFF_MOBILE,ret[0].Value) 
+//                     return ret;
+//                 }
+//             })
+//         }else{
+//             ret = JSON.parse(result.QueryResult);
+//             console.log("ret2222222222222")
+//             console.log(ret)
+//             setOrder(req, res,client,req_body.STAFF_MOBILE,ret[0].new_jifei_customerid) 
+//             return ret;
+//         }
+//     })
+// }
+// /*
+// *生成订单
+
+// */
+// var setOrder = function(req, res,client,name,customerid){
+//     var args = {};
+//     args.entityname = 'new_jifei_order';
+//     args.fields = 'new_jifei_ordername,new_jifei_packageid,new_jifei_customerid,new_jifei_ordersum,new_jifei_begintime,new_jifei_endtime,statecode,statuscode';//createdon, 
+//     // args.fields = 'new_jifei_packageid,new_jifei_customerid';//createdon, 
+//     args.filter = '[{"Key":"new_jifei_ordername","Value":"'+name+'"}]';
+//     console.log('*********************开始查询用户订单信息**********************');
+//     client.Query(args,function(err,result){
+//         console.log(err);
+//         console.log(result.QueryResult)
+//         var off = null;
+//         for(var a in result.QueryResult){
+//             if(a){
+//                 off = true;
+//             }
+//         }
+//         if(off){
+
+//         }else{
+            
+//         }
+//     })
+// }
+
+// var createOrder = function(data){
+//     var args = {}; 
+//     args.entityname = 'new_jifei_order';
+//     args.data = '['+ //订购数量 new_jifei_ordersum  订购金额   生效日期 
+//     '{"Key":"new_jifei_ordername","Value":"'+data.name+'"},'+
+//     '{"Key":"new_jifei_customerid","Value":"'+data.customerid+'"},'+
+//     '{"Key":"new_jifei_packageid","Value":"b304a62d-c7fe-e411-9d79-c81f66bf2dd0"},'+
+//     '{"Key":"new_jifei_ordersum","Value":"1"},'+
+//     '{"Key":"new_jifei_orderamount","Value":"20"},'+
+//     '{"Key":"new_financial","Value":"1"},'+
+//     '{"Key":"new_jifei_taketype","Value":"0"},'+
+//     '{"Key":"new_jifei_begintime","Value":"'+data.begintime+'"},'+
+//     '{"Key":"new_jifei_endtime","Value":"'+data.endtime+'"},'+
+//     '{"Key":"new_laiyuan","Value":"武汉中原"},'+
+//     ']';
+//     client.Create(args,function(err,result){
+//         for(a in result.CreateResult){
+//             if(a){
+//                 off = true;
+//             }
+//         }
+//         if(off){
+//             var ret = JSON.parse(result.CreateResult); 
+//             console.log("订单创建成功")                  
+//             console.log(ret)                  
+//             if(ret.issuccess == true){
+//                 if(req.body.STAFF_MOBILE){        
+//                   // var url ="http://112.84.178.29:86/restful/jifei_login.aspx?phone="+req.body.STAFF_MOBILE+"&password="+req.body.STAFF_MOBILE+"&qudao="
+//                   // nodegrass.get(url,function(data,status,headers){
+//                   //   console.log(status);
+//                   //   console.log(headers);
+//                   //   console.log(data);
+//                   // },'gbk').on('error', function(e) {
+//                   //     console.log("Got error: " + e.message);
+//                   // });
+//                 }
+//                 // return res.send(ret);
+//                 res.json({statusCode:200,info:ret})
+//             }else{
+//                 var _err = {'issuccess':false,'data':'抱歉，提交失败！'}
+//                 return res.send(_err);      
+//             }
+//     }
+//     })
+// }
+
+// var setOrder = function(req, res,client,name,customerid){
+//       var args = {};
+//       args.entityname = 'new_jifei_order';
+//       args.fields = 'new_jifei_ordername,new_jifei_packageid,new_jifei_customerid,new_jifei_ordersum,new_jifei_begintime,new_jifei_endtime,statecode,statuscode';//createdon, 
+//       // args.fields = 'new_jifei_packageid,new_jifei_customerid';//createdon, 
+//       args.filter = '[{"Key":"new_jifei_ordername","Value":"'+name+'"}]';
+//       console.log("args3333333333")
+//       console.log(args)
+//       client.Query(args,function(err,result){
+//         console.log(err)
+//         console.log(result.QueryResult)
+//         var off = null;
+//         for(a in result.QueryResult){
+//             if(a){
+//                 off = true;
+//             }
+//         } 
+//         var now = new Date(); 
+//         var begintime = now.Format("yyyy-MM-dd  hh:mm:ss") 
+//         var begintime_p =Date.parse(begintime);
+//         now.addMonths(1);//加减日期
+//         var endtime = now.Format("yyyy-MM-dd  hh:mm:ss")  
+//         var endtime_p =Date.parse(endtime); 
+//         if(off){
+//           if(==1){
+//             var data = JSON.parse(result.QueryResult);
+//             console.log("data55555555555555")
+//             console.log(data) 
+//             var begintime1 = data[0].new_jifei_begintime
+//             var endtime1 = data[0].new_jifei_endtime
+//             var begintime1_p =  Date.parse(begintime1);
+//             var endtime1_p =  Date.parse(endtime1); 
+//             var now2  = new Date(endtime1);
+//             now2.addMonths(1);//加减日期
+//             var now2f = now2.Format("yyyy-MM-dd  hh:mm:ss")  
+//             console.log(endtime1)
+//             console.log(now2)
+//             console.log(now2f) 
+//             //原有最新的结束时间t0大于当前时间t，则结束时间为t0+,开始时间为t0 
+//             if(endtime1_p > begintime_p){ 
+//                 begintime = endtime;
+//                 endtime = now2f;
+//             } 
+//           }else if(==5){
+                        
+//           }
+//          }
+      
+//         var args = {}; 
+//         args.entityname = 'new_jifei_order';
+//         args.data = '['+ //订购数量 new_jifei_ordersum  订购金额   生效日期 
+//         '{"Key":"new_jifei_ordername","Value":"'+name+'"},'+
+//         '{"Key":"new_jifei_customerid","Value":"'+customerid+'"},'+
+//         '{"Key":"new_jifei_packageid","Value":"b304a62d-c7fe-e411-9d79-c81f66bf2dd0"},'+
+//         '{"Key":"new_jifei_ordersum","Value":"1"},'+
+//         '{"Key":"new_jifei_orderamount","Value":"20"},'+
+//         '{"Key":"new_financial","Value":"1"},'+
+//         '{"Key":"new_jifei_taketype","Value":"0"},'+
+//         '{"Key":"new_jifei_begintime","Value":"'+begintime+'"},'+
+//         '{"Key":"new_jifei_endtime","Value":"'+endtime+'"},'+
+//         '{"Key":"new_laiyuan","Value":"武汉中原"},'+
+//         ']';
+//         console.log(args)  
+//         client.Create(args,function(err,result){
+//           for(a in result.CreateResult){
+//             if(a){
+//                 off = true;
+//             }
+//           }
+//           if(off){
+//             var ret = JSON.parse(result.CreateResult); 
+//             console.log("ret666666666666")                  
+//             console.log(ret)                  
+//             if(ret.issuccess == true){
+//               if(req.body.STAFF_MOBILE){        
+//                   // var url ="http://112.84.178.29:86/restful/jifei_login.aspx?phone="+req.body.STAFF_MOBILE+"&password="+req.body.STAFF_MOBILE+"&qudao="
+//                   // nodegrass.get(url,function(data,status,headers){
+//                   //   console.log(status);
+//                   //   console.log(headers);
+//                   //   console.log(data);
+//                   // },'gbk').on('error', function(e) {
+//                   //     console.log("Got error: " + e.message);
+//                   // });
+//               }
+//               // return res.send(ret);
+//               res.json({statusCode:200,info:ret})
+//             }else{
+//                 var _err = {'issuccess':false,'data':'抱歉，提交失败！'}
+//                 return res.send(_err);      
+//             }
+//           }         
+//         })
+        
+//     }) 
+// }
+
+
+Date.prototype.Format = function(fmt) { 
+        //代码作者: meizz 
+  var o = {
+    "M+" : this.getMonth() + 1, //月份 
+    "d+" : this.getDate(), //日 
+    "h+" : this.getHours(), //小时 
+    "m+" : this.getMinutes(), //分 
+    "s+" : this.getSeconds(), //秒 
+    "q+" : Math.floor((this.getMonth() + 3) / 3), //季度 
+    "S" : this.getMilliseconds() //毫秒 
+  };
+  if (/(y+)/.test(fmt))
+    fmt = fmt.replace(RegExp.$1, (this.getFullYear() + "").substr(4 - RegExp.$1.length));
+    for (var k in o)
+      if (new RegExp("(" + k + ")").test(fmt))
+          fmt = fmt.replace(RegExp.$1, (RegExp.$1.length == 1) ? (o[k]) : (("00" + o[k]).substr(("" + o[k]).length)));
+    return fmt;
+}
+     Date.prototype.addDays = function(d){
+        this.setDate(this.getDate() + d);
+     };
+     Date.prototype.addWeeks = function(w)
+     {
+        this.addDays(w * 7);
+     };
+     Date.prototype.addMonths= function(m)
+     {
+         var d = this.getDate();
+         this.setMonth(this.getMonth() + m);
+         if (this.getDate() < d)
+         this.setDate(0);
+     };
+    Date.prototype.addYears = function(y){
+      var m = this.getMonth();
+      this.setFullYear(this.getFullYear() + y);
+      if (m < this.getMonth()){
+        this.setDate(0);
+      }
+    };

@@ -1,0 +1,22 @@
+module.exports = {
+    url : 'http://112.84.178.38:89/restful/obdservice.asmx?wsdl',
+    appKey : 'xwmzjey612877ehjyqrleto096nwkaif',
+    defaulPacks : [{
+		'new_jifei_packageid':'35CC3F00-4D42-E511-9804-C81F66BF2DD0',
+		'new_jifei_packageidname':'自营包月套餐',
+		'new_pack_pirce':30.0,
+    },{
+    	'new_jifei_packageid':'A0142B16-4D42-E511-9804-C81F66BF2DD0',
+		'new_jifei_packageidname':'自营季度套餐',
+		'new_pack_pirce':80.0,
+    },{
+    	'new_jifei_packageid':'38C9B32B-4D42-E511-9804-C81F66BF2DD0',
+		'new_jifei_packageidname':'自营半年套餐',
+		'new_pack_pirce':150.0,
+    },{
+    	'new_jifei_packageid':'0A46E648-4D42-E511-9804-C81F66BF2DD0',
+		'new_jifei_packageidname':'自营包年套餐',
+		'new_pack_pirce':280.0,
+    }]
+    // appKey : '123'
+}

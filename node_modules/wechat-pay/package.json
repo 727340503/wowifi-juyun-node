@@ -1,0 +1,53 @@
+{
+  "name": "wechat-pay",
+  "version": "0.2.0",
+  "description": "wechat payment api for document v3.3.5",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/supersheep/wechat-pay.git"
+  },
+  "keywords": [
+    "wechat",
+    "payment"
+  ],
+  "author": {
+    "name": "spud"
+  },
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/supersheep/wechat-pay/issues"
+  },
+  "homepage": "https://github.com/supersheep/wechat-pay",
+  "dependencies": {
+    "MD5": "^1.2.1",
+    "request": "^2.45.0",
+    "sha1": "^1.1.0",
+    "underscore": "^1.7.0",
+    "xml2js": "^0.4.4"
+  },
+  "gitHead": "b22612e441b478057180bc6583ef901c2977f8e3",
+  "_id": "wechat-pay@0.2.0",
+  "_shasum": "58ea5cd6ee92a5d52f6b6795f497fc84baea948d",
+  "_from": "wechat-pay@*",
+  "_npmVersion": "1.4.28",
+  "_npmUser": {
+    "name": "spud",
+    "email": "supersheepxjy@gmail.com"
+  },
+  "maintainers": [
+    {
+      "name": "spud",
+      "email": "supersheepxjy@gmail.com"
+    }
+  ],
+  "dist": {
+    "shasum": "58ea5cd6ee92a5d52f6b6795f497fc84baea948d",
+    "tarball": "http://registry.npmjs.org/wechat-pay/-/wechat-pay-0.2.0.tgz"
+  },
+  "directories": {},
+  "_resolved": "https://registry.npmjs.org/wechat-pay/-/wechat-pay-0.2.0.tgz"
+}

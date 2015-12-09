@@ -1,0 +1,414 @@
+var soap = require('soap');
+var settings = require('../../settings');
+var Time = require('./time');
+var AUTH = require('../util/auth');
+
+
+
+//用户签到
+exports.sign = function(req,res){
+	var data = req.body;
+	// var data  = req.query;
+	try{
+		var userid = data.userid;
+		if(!userid || userid == ''){
+			return res.json({resultCode:'1',info:'用户不能为空'});
+		}
+		var url = settings.url;
+		console.log(url);
+		soap.createClient(url,function(err,client){
+			if(err){
+				console.log(err);
+				console.log('*****************远程连接异常***************');
+				return res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+			}
+			var nowDate = Time.format(new Date(),'yyyy/MM/dd');
+			var args = {};
+			args.entityname = "new_jifei_checkin";
+        	args.filter = '[{"Logical":"and","Conditions":[{"Key":"new_jifei_customerid","Operator":"=","Value":"'+userid+'"},'+
+        				  '{"Key":"new_date","Operator":"=","Value":"'+nowDate+'"},'+
+        				  '{"Key":"new_type","Operator":"=","Value":1}]}]';
+	        args.fields = 'new_jifei_checkinid,new_date,createdon';
+          	args.orderby = 'createdon desc';
+	        args.pagesize = 1;
+	        args.pageindex = 1;
+        	console.log(args);
+        	console.log('********************开始查询用户是否签到****************');
+        	client.Query(args,function(err,result){
+        		if(err){
+        			console.log(err);
+        			console.log('*****************查询签到历史失败*****************');
+        			return res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+        		}
+        		var off = true;
+        		for(var a in result.QueryResult){
+        			if(a){
+        				off = false;
+        				break;
+        			}
+        		}
+        		console.log(result);
+        		if(off){//判断是否已经签到
+        			var createArgs = {};
+    				createArgs.entityname ='new_jifei_checkin';
+    				
+        			createArgs.data =  '[{"Key":"new_jifei_customerid","Value":"'+userid+'"},'+
+        								'{"Key":"new_type","Value":1},'+
+        								'{"Key":"new_date","Value":"'+Time.format(new Date(),'yyyy-MM-dd')+'"}]';
+        			console.log(createArgs);
+        			client.Create(createArgs,function(err,result){
+        				if(err){
+        					console.log(err);
+        					console.log('****************插入签到表错误****************');
+        					return res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+        				}
+        				var off = null;
+        				for(var a in result.CreateResult){
+        					if(a){
+        						off = true;
+        						break;
+        					}
+        				}
+        				console.log(result);
+        				if(off){
+        					var data = JSON.parse(result.CreateResult);
+        					if(data.issuccess){
+        						res.json({resultCode:'0',info:'签到成功'});
+        					}else{
+        						res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+        					}
+        				}
+        			});
+        		}else{
+        			var qrydata = JSON.parse(result.QueryResult);
+        			if(qrydata.issuccess != undefined || qrydata.issuccess == false){
+        				return res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+        			}
+        			return res.json({resultCode:'2',info:'对不起,您今天已经签到'});
+        		}
+        	});
+		});
+	}catch(e){
+		console.log(e);
+		res.json({resultCode:'1',info:'签到不成功,请稍候重试'});
+	}
+}
+
+//查询用户积分
+exports.userIntegral = function(req,res){
+	// var data = req.query;
+	var data = req.body;
+	try{
+		var userid = data.userid;
+		if(!userid || userid == ''){
+			return res.json({resultCode:'1',info:'用户不能为空'});
+		}
+		var url = settings.CRMSERVICE_WSDL;
+		soap.createClient(url,function(err,client){
+			if(err){
+				console.log(err);
+				console.log('*****************连接失败*******************');
+				return res.json({resultCode:'1',info:'连接异常,请稍后重试'});
+			}
+			var args = {};
+			args.entityname = "new_jifei_customer";
+			args.filter = '[{"Key":"new_jifei_customerid","Value":"'+userid+'"}]';
+	        args.fields = 'new_kyintegral,new_integral,new_djintegral';
+	        client.Query(args,function(err,result){
+	        	if(err){
+	        		console.log(err);
+	        		console.log('*************查询出错****************');
+	        		return res.json({resultCode:'1',info:'查询失败,请稍后重试'});
+	        	}
+	        	var off = null;
+	        	for(var a in result.QueryResult){
+	        		if(a){
+	        			off = true;
+	        			break;
+	        		}
+	        	}
+	        	console.log(result);
+	        	if(off){
+	        		var qryData = JSON.parse(result.QueryResult);
+	        		if(qryData.issuccess != undefined || qryData.issuccess == false){
+	        			return res.json({resultCode:'1',info:'查询失败,请稍后重试'});
+	        		}
+	        		res.json({resultCode:'0',info:'',data:qryData[0]});
+	        	}
+	        });
+		});
+	}catch(e){
+		console.log(e);
+		console.log('****************处理数据出错***************');
+		res.json({resultCode:'1',info:'查询失败,请稍后重试'});
+	}
+}
+
+//查询用户当月签到历史
+exports.userSigns = function(req,res){
+	var data = req.body;
+	// var data = req.query;
+	try{
+		var userId = data.userid;
+		var startDate = data.startDate;
+		var stopDate = data.stopDate;
+		if(!userId || userId == ''){
+			return res.json({resultCode:'1',info:'用户不能为空'});
+		}
+		if(!startDate || startDate == ''){
+			return res.json({resultCode:'1',info:'开始时间不能为空'});
+		}
+		if(!stopDate || stopDate == ''){
+			return res.json({resultCode:'1',info:'结束时间不能为空'});
+		}
+		var url = settings.url;
+		soap.createClient(url,function(err,client){
+			if(err){
+				console.log(err);
+				return res.json({resultCode:'1',info:'远程连接异常,请稍后重试'});
+			}
+			var start = Time.format(new Date(startDate),'yyyy/MM/dd');
+			var stop = Time.format(new Date(stopDate),'yyyy/MM/dd');
+			var args = {};
+			args.entityname = "new_jifei_checkin";
+	        args.filter = '[{"Logical":"and","Conditions":['+
+	        											'{"Key":"new_jifei_customerid","Operator":"=","Value":"'+userId+'"},'+
+	        			  								'{"Key":"new_date","Operator":">=","Value":"'+start+'"},'+
+	        			  								'{"Key":"new_date","Operator":"<=","Value":"'+stop+'"},'+
+	        			  								'{"Key":"new_type","Operator":"=","Value":1}]}]';
+	        args.fields = 'new_date,new_type,createdon';
+          	args.orderby = 'new_date desc';
+	        args.pagesize = 10000;
+	        args.pageindex = 1;
+	        console.log(args);
+	        console.log('******************开始查询用户签到记录************************');
+	        client.Query(args,function(err,result){
+	        	if(err){
+	        		console.log(err);
+	        		console.log('*******************查询出错*********************');
+	        		return res.json({resultCode:'2',info:'查询失败，请重试'});
+	        	}
+	        	var off = null;
+	        	for(var a in result.QueryResult){
+	        		if(a){
+	        			off = true;
+	        			break;
+	        		}
+	        	}
+	        	console.log(result);
+	        	if(off){
+	        		var resultData = JSON.parse(result.QueryResult);
+	        		if(resultData.issuccess!= undefined || resultData.issuccess == false){
+						res.json({resultCode:'2',info:'查询失败，请重试'});
+	        		}else{
+	        			res.json({resultCode:'0',info:'查询成功',data:resultData});
+	        		}
+	        	}else{
+	        		res.json({resultCode:'1',info:'用户还没有签到信息'});
+	        	}
+	        });
+		});
+	}catch(e){
+		console.log(e);
+		console.log('*********************处理数据出错**********************');
+		res.json({resultCode:'2',info:'查询失败，请重试'});
+	}
+}
+
+//查询积分规则对应的积分
+exports.qryIntegral = function(req,res){
+	var data = req.body;
+	// var data = req.query;
+	try{
+		var integralName  = data.name;
+		if(!integralName || integralName == ''){
+			return res.json({resultCode:'1',info:'积分规则名字不能为空'});
+		}
+		var new_type = null;
+		if(integralName == '签到'){
+			new_type = 1;
+		}else if(integralName == '分享'){
+			new_type = 2;
+		}else if(integralName == '首次注册'){
+			new_type = 3;
+		}else{
+			return res.json({resultCode:'1',info:'对不起,你输入的积分规则不存在'});
+		}
+		var url = settings.url;
+		soap.createClient(url,function(err,client){
+			if(err){
+				console.log(err);
+				console.log('****************远程连接异常****************');
+				return res.json({resultCode:'1',info:'查询失败,请稍后重试'});
+			}
+			var now =  Time.format(new Date(),'yyyy/MM/dd');
+			var args = {};
+			args.entityname = "new_jifei_integral";
+	        args.filter = '[{"Logical":"and","Conditions":[{"Key":"new_type","Operator":"=","Value":'+new_type+'}]}]';
+	        args.fields = 'new_integral,createdon';
+          	args.orderby = 'createdon desc';
+	        args.pagesize = 1;
+	        args.pageindex = 1;
+	        console.log(args);
+	        console.log('******************开始查询用户积分规则*********************');
+	        client.Query(args,function(err,result){
+	        	if(err){
+	        		console.log(err);
+	        		console.log('*****************查询失败****************');
+	        		return res.json({resultCode:'1',info:'查询失败,请稍后重试'});
+	        	}
+	        	var off = null;
+	        	for(var a in result.QueryResult){
+	        		if(a){
+	        			off = true;
+	        			break;
+	        		}
+	        	}
+	        	console.log(result);
+	        	if(off){
+	        		var integralData = JSON.parse(result.QueryResult);
+	        		if(integralData.issuccess != undefined || integralData.issuccess == false){
+	        			res.json({resultCode:'1',info:'对不起,你输入的积分规则不存在'});
+	        		}else{
+	        			res.json({resultCode:'0',info:'',integral:integralData[0].new_integral});
+	        		}
+	        	}else{
+	        		res.json({resultCode:'1',info:'对不起,你输入的积分规则不存在'});
+	        	}
+	        });
+		});
+	}catch(e){
+		console.log(e);
+		console.log('*********************处理数据出错*****************');
+		res.json({resultCode:'2',info:'查询失败，请重试'});
+	}
+}
+
+
+//修改密码接口
+exports.editUserPassword = function(req,res){
+	var data = req.body;
+	// var data = req.query;
+	try{
+		var appUserId = data.appUserid;
+		var user = data.user;
+		var oldPassword = data.oldPwd;
+		var newPassword = data.newPwd;
+		var userId = data.userid;
+		// if(!userId || userId == ''){
+		// 	return res.json({resultCode:'1',info:'上网用户不能为空'});
+		// }
+		if(!appUserId || appUserId == ''){
+			return res.json({resultCode:'1',info:'登录用户不能为空'});
+		}
+		if(!user || user == ''){
+			return res.json({resultCode:'1',info:'帐号不能为空'});
+		}
+		if(!oldPassword || oldPassword == ''){
+			return res.json({resultCode:'1',info:'原始密码不能为空'});
+		}
+		if(!newPassword || newPassword == ''){
+			return res.json({resultCode:'1',info:'新密码不能为空'});
+		}
+		var url = settings.CRMSERVICE_WSDL29;
+		soap.createClient(url,function(err,client){
+			if(err){
+				console.log(err);
+				console.log('****************远程连接异常**************');
+				return res.json({resultCode:'1',info:'远程连接异常，请重试'});
+			}
+			var qryUserData = {};
+			qryUserData.client = client;
+			qryUserData.userId = appUserId;
+			AUTH.qryAppUser(qryUserData,function(err,userInfo){
+				if(err){
+					return res.json({resultCode:'1',info:'查询用户失败，请稍后重试'});
+				}
+				if(userInfo != null){
+					if(userInfo.new_pwd != oldPassword){
+	    				return res.json({resultCode:'1',info:'原密码不正确'});
+	    			}
+	    			if(user != userInfo.new_accountno){
+	    				return res.json({resultCode:'1',info:'帐号不正确'});
+	    			}
+
+	    			updUserData = {};
+	    			updUserData.userId = appUserId;
+	    			updUserData.pwd = newPassword;
+	    			updUserData.client = client;
+	    			AUTH.updAppUser(updUserData,function(err,flag){
+	    				if(err){
+	    					return res.json({resultCode:'1',info:'更新用户失败，请稍后重试'});
+	    				}
+	    				if(flag){
+	    					if(!userId || appUserId == ''){
+	    						res.json({resultCode:'0',info:'修改密码成功'});
+			    			}else{
+		    					var url2 = settings.url;
+		    					soap.createClient(url2,function(err,client2){
+		    						if(err){
+		    							console.log(err);
+		    							console.log('*********************更新38用户出错********************');
+		    						}
+		    						var upd38UserData = {};
+		    						upd38UserData.client = client2;
+		    						upd38UserData.new_jifei_customerid = userId;
+		    						upd38UserData.password = newPassword;
+		    						AUTH.updUser(upd38UserData,function(err,updInfo){
+		    							if(err){
+		    								console.log(err);
+		    								console.log('*****************更新38用户失败*****************');
+		    								return res.json({resultCode:'2',info:'远程连接超时，请稍后重试'});
+		    							}
+		    							if(updInfo != null){
+											res.json({resultCode:'0',info:'修改密码成功'});
+		    							}else{
+		    								res.json({resultCode:'2',info:'修改密码失败，请稍候重试'});
+		    							}
+		    						});
+		    					});
+			    			}
+	    				}else{
+	    					return res.json({resultCode:'1',info:'更新用户失败，请稍后重试'});
+	    				}
+	    			});
+				}else{
+					res.json({resultCode:'1',info:'用户不存在'});
+				}
+			});
+			// var qryUserData = {};
+			// qryUserData.userId = userId;
+			// qryUserData.client = client;
+			// AUTH.qryUser(qryUserData,function(err,userInfo){
+			// 	if(err){
+			// 		return res.json({resultCode:'1',info:'查询用户失败，请重试'});
+			// 	}
+			// 	if(userInfo != null && userInfo != ''){
+			// 		if(userInfo.new_userPssword != oldPassword){
+			// 			return res.json({resultCode:'1',info:'旧密码错误'});
+			// 		}
+			// 		var updData = {};
+			// 		updData.client = client;
+			// 		updData.password = newPassword;
+			// 		updData.new_jifei_customerid = userId;
+			// 		AUTH.updUser(updData,function(err,result){
+			// 			if(err){
+			// 				return res.json({resultCode:'1',info:'对不起，修改密码失败，请稍候再试'});
+			// 			}
+			// 			if(result != null){
+			// 				res.json({resultCode:'0',info:'密码修改成功'});
+			// 			}else{
+			// 				res.json({resultCode:'1',info:'对不起，修改密码失败，请稍候再试'});
+			// 			}
+			// 		});
+			// 	}else{
+			// 		return res.json({resultCode:'1',info:'对不起，用户不存在'});
+			// 	}
+			// });
+		});
+	}catch(e){
+		console.log(e);
+		console.log('*********************处理数据出错*****************');
+		res.json({resultCode:'1',info:'查询失败，请重试'});
+	}
+}

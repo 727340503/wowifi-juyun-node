@@ -1,0 +1,371 @@
+var soap = require('soap'); 
+// var nodegrass = require('nodegrass'); 
+var settings = require('../../settings'); 
+var time = require('./time');
+var LTUtil = require('../util/xrmLTutil');
+var soap = require('soap');
+var settings = require('../../settings');
+var async = require('async');
+
+//新增企业信息
+exports.corp= function(req, res) {
+    var data = req.body;
+    // var data = req.query;
+    var factoryname = data.CORPNAME; 
+    var companyNum = data.CORPACCOUNT;
+    var url = settings.CRMSERVICE_WSDL; 
+    //订购
+    if(!companyNum || companyNum==''){
+        res.send({'issuccess':false,'data':'集团编号不能为空'});  
+        return;
+    }
+    if(!factoryname || factoryname == ''){
+        return res.send({'issuccess':false,'data':'集团名称不能为空'});  
+    }
+    soap.createClient(url,function(err,client){
+        var off = null;
+        var args = {};
+        args.entityname = 'new_jifei_factory';
+        args.fields = 'new_jifei_factoryname,new_jifei_factoryid,statecode';//createdon, 
+        args.filter = '[{"Key":"new_jifei_corpanum","Value":"'+companyNum+'"}]';//factoryname
+        console.log(args)
+        client.Query(args,function(err,result){
+            var off = null;
+            for(a in result.QueryResult){
+                if(a){
+                    off = true;
+                }
+            }
+            // console.log(result);
+            //不存在，则新增企业信息
+            if(off == null){
+                if(data.OPTYPE==1){//判断是否是订阅，如果是订阅则新增企业信息
+                    var args = {};
+                    args.entityname = 'new_jifei_factory';
+                    args.data = '[{"Key":"new_jifei_factoryname","Value":"'+factoryname+'"},'+
+                                '{"Key":"new_jifei_corpanum","Value":"'+companyNum+'"},'+
+                                '{"Key":"new_jifei_factionoper","Value":1}]';
+                    console.log(args);
+                    console.log('*******************开始插入工厂**********************');
+                    client.Create(args,function(err,result){
+                        if(err){
+                            var _err = {'issuccess':false,'data':'抱歉，服务器发生错误！'}
+                            res.send(_err);
+                        }
+                        var off = null;
+                        for(a in result.CreateResult){
+                            if(a){
+                                off = true;
+                            }
+                        }
+                        console.log(result);
+                        if(off){  
+                            var createData = JSON.parse(result.CreateResult);
+                            if(createData.issuccess){
+                                res.send({'issuccess':true,'data':'提交成功'});
+                            }else{
+                                res.send({'issuccess':false,'data':'提交失败'});  
+                            }
+                        }else{
+                            var _err = {'issuccess':false,'data':'抱歉，提交失败！'}
+                            res.send(_err);  
+                        }
+                    })
+                }else{
+                    res.send({'issuccess':false,'data':'抱歉，提交失败！'});
+                }
+            }else{
+                if(data.OPTYPE==1){
+                    res.send({'issuccess':true,'data':'企业信息已经存在'});
+                }else if(data.OPTYPE==5){
+                    var updData = JSON.parse(result.QueryResult)[0];
+                    if(updData.statecode == 1){//判断企业状态
+                        return res.send({'issuccess':true,'data':'企业退订成功'});
+                    }
+                    updData.client = client;
+                    LTUtil.factoryUsers(updData,function(num){
+                        if(num != 0){
+                            res.send({'issuccess':false,'data':'该集团下还有正在使用的用户'});
+                        }else{
+                            updData.state = 1;
+                            LTUtil.editFactoryState(updData,function(flag){
+                                if(flag){
+                                    var _err = {'issuccess':true,'data':'企业退订成功'};
+                                    res.send(_err);
+                                }else{
+                                    res.send({'issuccess':false,'data':'企业退订失败'});                            
+                                }
+                            });
+                        }
+                    });
+                }else{
+                    var _err = {'issuccess':false,'data':'非法请求'};
+                    res.send(_err);
+                }
+            }
+        });
+    });
+}
+
+
+//新增账号、订单
+exports.staff = function(req, res) {
+    // var factoryname = req.query.CORPNAME; 
+    // var url = settings.CRMSERVICE_WSDL; 
+    // var params = req.query;//获取请求参数
+
+    // var factoryname = req.body.CORPNAME; 
+    var companyNum = req.body.CORPACCOUNT;
+    if(!companyNum || companyNum == ''){
+        return res.send({'issuccess':false,'data':'集团编号不能为空'});
+    }
+    var url = settings.CRMSERVICE_WSDL; 
+    var params = req.body;//获取请求参数
+    console.log(req.url)
+    console.log(req.body)
+    soap.createClient(url,function(err,client){
+        if(err){
+            console.log(err);
+            return res.send({'issuccess':false,'data':'远程连接异常,请稍后重试'});
+        }
+        //查询企业信息
+        var args = {};
+        args.entityname = 'new_jifei_factory';
+        args.filter = '[{"Key":"new_jifei_corpanum","Value":"'+companyNum+'"}]';
+        args.fields = 'new_jifei_factoryname,new_jifei_factoryid';//createdon, 
+        client.Query(args,function(err,result){
+            if(err){
+                console.log(err);
+                return res.send({'issuccess':false,'data':'查询出错,请稍后重试'});
+            }
+            var off = null;
+            for(a in result.QueryResult){
+                if(a){
+                    off = true;
+                }
+            }
+            console.log(result);
+            console.log('**************用户企业信息结果****************');
+            if(off){
+                var resultData = JSON.parse(result.QueryResult);
+                if(resultData.issuccess != undefined || resultData.issuccess == false){
+                    return res.send({'issuccess':false,'data':'对不起,用户企业信息不存在'});
+                }
+                var userInfoObj = null;
+                var orderInfoObj = null;
+                async.auto({
+                    qryUserInfo : function(callback){//查询用户个人信息
+                        var qryData = {};
+                        qryData.client = client;
+                        qryData.STAFF_MOBILE = params.STAFF_MOBILE;
+                        LTUtil.getUserInfo(qryData,function(userInfo){//查询用户信息 
+                            //判断用户是否存在
+                            if(userInfo.resultCode == 0){//用户存在，则继续下一步
+                                userInfoObj = userInfo.data;
+                                if(userInfoObj.new_recordtype != 1){//判断用户的类型不为联通
+                                    var upduserdata = {};
+                                    upduserdata.client = client;
+                                    upduserdata.new_recordtype = 1;
+                                    upduserdata.new_jifei_customerid = userInfo.data.new_jifei_customerid;
+                                    LTUtil.updUserInfo(upduserdata,function(flag){
+                                        if(flag){
+                                            callback(null,userInfo.data);
+                                        }else{
+                                            return res.send({'issuccess':false,'data':'修改用户来源信息失败,请重试'});
+                                        }
+                                    });
+                                }
+                            }else{//如果用户不存在，则创建用户
+                                //创建用户
+                                if(params.OPTYPE != 1){//判断用户是订购还是退订,如果是退订,可以返回信息给请求方
+                                    return res.send({'issuccess':true,'data':'对不起,该用户不存在'});
+                                }
+                                var createData = {};
+                                createData.STAFF_MOBILE = params.STAFF_MOBILE;
+                                createData.factoryId = resultData[0].new_jifei_factoryid;
+                                createData.client = client;
+                                LTUtil.createUser(createData,function(data){
+                                    if(data.resultCode == 0){
+                                        userInfoObj = data;
+                                        callback(null,data);
+                                    }else{//如果用户创建失败，则是直接返回失败信息
+                                        return res.send({'issuccess':false,'data':'对不起,创建用户失败,请稍后重试'});
+                                    }
+                                });  
+                            }
+                        });
+                    },
+                    qryUserOrder: ['qryUserInfo',function(callback,result){
+                        userId = userInfoObj.new_jifei_customerid;
+                        var qryData = {};
+                        qryData.userId = userId;
+                        qryData.client = client;
+                        LTUtil.qryOrder(qryData,function(orderInfo){
+                            if(orderInfo.resultCode == 0){//如果用户订单存在，则继续下一步
+                                orderInfoObj = orderInfo.data;
+                                callback(null,orderInfoObj);
+                            }else{//如果用户订单不存在,则为用户创建失效订单,生效时间由xrm数据库去处理
+                                //创建用户创建失效订单
+                                if(params.OPTYPE != 1){//判断用户是订购还是退订,如果是退订,可以返回信息给请求方
+                                    return res.send({'issuccess':true,'data':'退订成功'});
+                                }
+                                var createData = {};
+                                createData.client = client;
+                                var num = 1;
+                                createData.num = num;//暂时定为一个
+                                createData.money = settings.LT_PRICE*num;
+                                LTUtil.createInvalidOrder(createData,function(data){
+                                    if(data.resultCode == 0){
+                                        orderInfoObj = data.data;
+                                        callback(null,data.data);
+                                    }else{
+                                        return res.send({'issuccess':false,'data':'用户创建订单失败,请稍候重试'});
+                                    }
+                                });
+                            }
+                        });
+                    }]
+                },function(err,results){
+                    console.log(orderInfoObj);
+                    console.log(userInfoObj);
+                    var url2 = settings.url;
+                    soap.createClient(url2,function(err,client2){
+                        if(err){
+                            console.log(err);
+                            console.log('*****************二次连接出错***************');
+                            return res.send({'issuccess':false,'data':'用户更新订单失败,请重试'});
+                        }
+                        if(params.OPTYPE == 1){//用户订购
+                            if(userInfoObj.statecode == 1){
+                                //判断用户状态是否属于禁用,如果是更改状态为可用
+                                var updUserData = {};
+                                updUserData.state = 0;
+                                updUserData.userInfoObj = userInfoObj;
+                                LTUtil.editUserState(updUserData,function(flag){
+                                    if(!flag){
+                                        return res.send({'issuccess':false,'data':'用户订购失败'});
+                                    }
+                                });
+                            }
+                            var createLTOrderArgs = {};
+                            createLTOrderArgs.client = client;
+                            createLTOrderArgs.client2 = client2;
+                            createLTOrderArgs.num = 12;
+                            createLTOrderArgs.factoryId = resultData[0].new_jifei_factoryid;
+                            createLTOrderArgs.mobile = params.STAFF_MOBILE;
+                            createLTOrderArgs.userId = userInfoObj.new_jifei_customerid;
+                            createLTOrderArgs.endTime = orderInfoObj.new_jifei_endtime;
+                            createLTOrderArgs.price = settings.LT_PRICE;
+                            createLTOrderArgs.orderId = orderInfoObj.new_jifei_orderid;
+                            createLTOrderArgs.reqData = params;
+                            LTUtil.createLTOrder(createLTOrderArgs,function(flag){
+                                if(flag){
+                                    res.send({'issuccess':true,'data':'用户订购成功'});
+                                    var zydzId = settings.LTWHZYID.toUpperCase();//武汉中原电子的id
+                                    var userSystemId = userInfoObj.ownerid.toUpperCase();
+                                    if(userSystemId != zydzId){
+                                        //用户订购成功后判断用户的负责人是否为中原电子
+                                        var userUpdData = {};
+                                        userUpdData.ownerid = zydzId;
+                                        userUpdData.new_jifei_customerid = userInfoObj.new_jifei_customerid;
+                                        userUpdData.client = client;
+                                        LTUtil.updUserInfo(userUpdData,function(flag){
+                                            if(flag){
+                                                console.log('***************更新用户负责人信息成功*************');
+                                            }else{
+                                                console.log('*********************更新用户负责人信息失败****************');
+                                            }
+                                        });
+                                    }
+                                }else{
+                                    res.send({'issuccess':false,'data':'用户更新订单失败,请重试'});
+                                }
+                            });
+                        }else if(params.OPTYPE == 5){//用户退定
+                            var userstatecode = userInfoObj.statecode;
+                            if(userstatecode == "1"){
+                                return res.send({'issuccess':true,'data':'该用户已经退订'});
+                            }
+                            var now = new Date();
+                            var endDate = new Date(now.getFullYear(), now.getMonth(), (now.getDate())-1, now.getHours(), now.getMinutes(), now.getSeconds());  
+                            var updOrderData = {};
+                            updOrderData.client = client;
+                            updOrderData.orderId = orderInfoObj.new_jifei_orderid;
+                            updOrderData.endTime = time.format(new Date(endDate).toLocaleString(),'yyyy-MM-dd HH:mm:ss');
+                            LTUtil.updOrderTime(updOrderData,function(flag){
+                                if(flag){
+                                    //首先将用户状态改为自营，接着将用户订单时间过期
+                                    var upduserdata = {};
+                                    upduserdata.client = client;
+                                    upduserdata.new_jifei_customerid = userInfoObj.new_jifei_customerid;
+                                    upduserdata.new_recordtype = 0;
+                                    upduserdata.ownerid = settings.SYSTEMUSERID;
+                                    LTUtil.updUserInfo(upduserdata,function(flag){
+                                       if(flag){
+                                            res.send({'issuccess':true,'data':'退订成功'});
+                                       }else{
+                                            res.send({'issuccess':false,'data':'退订失败'});
+                                       }
+                                    });
+                                }else{
+                                    res.send({'issuccess':false,'data':'退订失败'});
+                                }
+                            });
+                        }else{//未知请求
+                            res.send({'issuccess':false,'data':'未知请求'});
+                        }
+                    });
+                });
+            }else{
+                res.send({'issuccess':false,'data':'对不起,用户企业信息不存在'});
+            }
+        });
+    });
+}
+
+
+
+
+
+
+
+
+Date.prototype.Format = function(fmt) { 
+        //代码作者: meizz 
+  var o = {
+    "M+" : this.getMonth() + 1, //月份 
+    "d+" : this.getDate(), //日 
+    "h+" : this.getHours(), //小时 
+    "m+" : this.getMinutes(), //分 
+    "s+" : this.getSeconds(), //秒 
+    "q+" : Math.floor((this.getMonth() + 3) / 3), //季度 
+    "S" : this.getMilliseconds() //毫秒 
+  };
+  if (/(y+)/.test(fmt))
+    fmt = fmt.replace(RegExp.$1, (this.getFullYear() + "").substr(4 - RegExp.$1.length));
+    for (var k in o)
+      if (new RegExp("(" + k + ")").test(fmt))
+          fmt = fmt.replace(RegExp.$1, (RegExp.$1.length == 1) ? (o[k]) : (("00" + o[k]).substr(("" + o[k]).length)));
+    return fmt;
+}
+     Date.prototype.addDays = function(d){
+        this.setDate(this.getDate() + d);
+     };
+     Date.prototype.addWeeks = function(w)
+     {
+        this.addDays(w * 7);
+     };
+     Date.prototype.addMonths= function(m)
+     {
+         var d = this.getDate();
+         this.setMonth(this.getMonth() + m);
+         if (this.getDate() < d)
+         this.setDate(0);
+     };
+    Date.prototype.addYears = function(y){
+      var m = this.getMonth();
+      this.setFullYear(this.getFullYear() + y);
+      if (m < this.getMonth()){
+        this.setDate(0);
+      }
+    };

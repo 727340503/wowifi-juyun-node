@@ -1,0 +1,402 @@
+var soap = require('soap');
+var settings = require('../../settings');
+var Time = require('./time');
+var async = require('async');
+
+
+//查询用户所有订单
+exports.findAllOrder = function(req,res){
+	// var data = req.query;
+	var data = req.body;
+	try{
+		var userId = data.user;
+		var pagesize = data.pagesize;
+		var pageindex = data.pageindex;
+		var state = data.state;
+		var start = data.startTime;
+		var end = data.endTime;
+		if(!userId || userId == '' || !pagesize || '' == pagesize || !pageindex || '' == pageindex){
+			return res.json({resultCode:'1',info:'参数不能为空'});
+		}
+		var url = settings.url;
+		soap.createClient(url,function(err,client){
+			if(err){
+				console.log(err);
+				return res.json({resultCode:'2',info:'连接远程服务器出错'});
+			}
+			var args = {};
+	        args.entityname = 'new_jifei_order';
+	        args.filter = '[{"Logical":"or","Conditions":[{"Key":"new_jifei_customerid","Operator":"=","Value":"'+userId+'"}]}]';
+	        args.fields = 'new_jifei_customerid,new_jifei_packageid,new_jifei_packageidname,new_jifei_ordersum,new_pack_begintime,new_pack_pirce,new_jifei_endtime,new_strategy_cdate,statecode,createdon';
+          	args.orderby = 'new_jifei_endtime desc';
+	        args.pagesize = 1;
+	        args.pageindex = 1;
+	        console.log('********************查询用户剩余时长*********************');
+	        client.Query(args,function(err,result){
+	        	if(err){
+	        		console.log(err);
+	        		return res.json({resultCode:'2',info:'查询失败,请稍后重试'});
+	        	}
+	        	var off = null;
+	        	for(var a in result.QueryResult){
+	        		if(a){
+	        			off = true;
+	        		}
+	        	}
+	        	console.log(result);
+	        	if(off){
+	        		var resultData = JSON.parse(result.QueryResult)[0];
+	        		if(resultData.new_jifei_customerid && resultData.new_jifei_customerid != ''){
+		        		//计算用户剩余上网时长
+		        		var endTime = resultData.new_jifei_endtime;
+		        		var time = new Date(endTime);
+		        		var startTime = new Date();
+		        		var allTime = time.getTime()-startTime.getTime();
+		        		if(allTime < 0){
+		        			allTime = 0;
+		        		}
+		        		if(resultData.issuccess != undefined || resultData.issuccess == false){
+							return res.json({resultCode:'1',info:"查询用户订单失败，请稍后重试"});
+		        		}else{
+		        			var filter = "";
+							if(state && state != ''){
+								if(state == '0'){
+									filter = ',{"Key":"new_jifei_result","Operator":"=","Value":"未付款"}';
+								}else{
+									filter = ',{"Key":"new_jifei_result","Operator":"=","Value":"success"}';								
+								}
+							}
+							if(start && start != ''){
+								filter += ',{"Key":"createdon","Operator":">=","Value":"'+Time.format(new Date(start),'yyyy-MM-dd HH:mm:ss')+'"}';
+							}
+							if(end && end != ''){
+								filter += ',{"Key":"createdon","Operator":"<=","Value":"'+Time.format(new Date(end),'yyyy-MM-dd HH:mm:ss')+'"}';
+							}
+
+
+							async.auto({
+								qryPageOrder:function(callback){
+									var qryHistoyArgs = {};
+				        			qryHistoyArgs.entityname = 'new_jifei_alipay';
+							        qryHistoyArgs.filter = '[{"Logical":"and","Conditions":[{"Key":"new_jifei_customerid","Operator":"=","Value":"'+userId+'"}'+filter+']}]';
+							        qryHistoyArgs.fields = 'new_jifei_alipayid,new_jifei_tradeno,new_jifei_validtime,new_jifei_addtime,new_jifei_cardagent,new_jifei_money,new_jifei_ordersum,new_jifei_packageid,new_jifei_packagetempid,new_jifei_result,new_jifei_mobile,createdon';
+						          	qryHistoyArgs.orderby = 'createdon desc';
+							        qryHistoyArgs.pagesize = pagesize;
+							        qryHistoyArgs.pageindex = pageindex;
+							        console.log(qryHistoyArgs);
+				        			console.log('*********************查询用户充值历史记录********************');
+				        			client.Query(qryHistoyArgs,function(err,result){
+				        				if(err){
+				        					console.log(err);
+				        					console.log('***************查询用户充值历史出错****************8');
+				        					return res.json({resultCode:'1',info:'查询用户历史记录异常,请稍候再试'});
+				        				}
+				        				var off = null; 
+				        				for(var a in result.QueryResult){
+				        					if(a){
+				        						off = true;
+				        						break;
+				        					}
+				        				}
+				        				if(off){
+				        					var historyData = JSON.parse(result.QueryResult);
+				        					if(historyData.issuccess != undefined || historyData.issuccess == false){
+				        						return res.json({resultCode:'0',time:Math.floor(allTime/1000)+'',order_length:'0',data:"",allpage:'0'});
+				        					}
+				        					callback(null,historyData);
+				        				}else{
+				        					res.json({resultCode:'0',time:+Math.floor(allTime/1000)+'',order_length:'0',data:"",allpage:'0'});
+				        				}
+				        			});
+								},
+								qryAllPage:['qryPageOrder',function(callback,result){
+									//查询订单总页数
+		        					var qryHistoyAllPage = {};
+				        			qryHistoyAllPage.entityname = 'new_jifei_alipay';
+							        qryHistoyAllPage.filter = '[{"Logical":"and","Conditions":[{"Key":"new_jifei_customerid","Operator":"=","Value":"'+userId+'"}'+filter+']}]';
+							        qryHistoyAllPage.fields = 'createdon';
+						          	qryHistoyAllPage.orderby = 'createdon desc';
+							        qryHistoyAllPage.pagesize = 100000000;
+							        qryHistoyAllPage.pageindex = 1;
+							        console.log(result);
+							        console.log('**********************开始查询总页数**********************88');
+		        					client.Query(qryHistoyAllPage,function(err,result){
+	        							if(err){
+				        					console.log(err);
+				        					console.log('***************查询用户充值历史总页数出错****************8');
+				        					return res.json({resultCode:'1',info:'查询用户充值历史总页数异常,请稍候再试'});
+				        				}
+				        				var off = null; 
+				        				for(var a in result.QueryResult){
+				        					if(a){
+				        						off = true;
+				        						break;
+				        					}
+				        				}
+				        				console.log(result);
+				        				if(off){
+				        					var resultData = {};
+				        					var allPageData = JSON.parse(result.QueryResult);
+				        					resultData.off= off;
+				        					resultData.data = allPageData;
+				        					callback(null,resultData);
+				        				}else{
+				        					var resultData = {};
+				        					resultData.off = off;
+				        					callback(null,resultData);
+				        				}
+		        					});
+								}]
+							},function(err,results){
+								if(err){
+									return res.json({resultCode:'1',info:'查询用户历史记录异常,请稍候再试'});
+								}
+								var historyData = results.qryPageOrder;
+								var allPageData = results.qryAllPage;
+								//如果总页数查询没有结果
+								if(allPageData.off){
+									if(allPageData.issuccess != undefined || allPageData.issuccess == false){
+										return res.json({resultCode:'0',time:Math.floor(allTime/1000)+'',order_length:historyData.length+'',data:historyData,allpage:'0'});
+									}
+									console.log(allPageData.data);
+									var allOrder = allPageData.data.length;
+									var allPage = Math.ceil(allOrder/pagesize);
+									res.json({resultCode:'0',time:Math.floor(allTime/1000)+'',order_length:historyData.length+'',data:historyData,allpage:allPage+''});
+								}else{
+									res.json({resultCode:'0',time:Math.floor(allTime/1000)+'',order_length:historyData.length+'',data:historyData,allpage:'0'});
+								}
+							});
+		        		}
+	        		}else{
+	        			return res.json({resultCode:'1',info:"用户不存在"});
+	        		}
+	        		// res.json({resultCode:0,time:Math.floor(allTime/1000),orderlenght:resultData.length,data:resultData});
+	        	}else{
+	        		res.json({resultCode:'1',info:'该用户订单不存在'});
+	        	}
+	        });
+		});
+	}catch(e){
+		console.log('>>>>>>>>>>>>>发生了异常<<<<<<<<<<<<');
+		console.log(e);
+		res.json({resultCode:'2',info:'服务器忙，请重试'});
+	}
+}
+
+
+
+
+//alipay充值订单
+exports.createOrder = function(req,res){
+	var data = req.body;
+	console.log(data);
+	try{
+		var packageId = data.package;
+		var phone = data.phone;
+		var num = parseInt(data.num);
+		var accountId = data.accountId;
+		var Key = data.key;
+		var systemKey = settings.appKey;
+		if(num && num != '' && phone && phone != '' && packageId && packageId != '' && Key && Key != ''){
+			if(systemKey != Key){
+				return res.json({resultCode:'1',info:'非法请求'});
+			}
+			var url = settings.url;
+			soap.createClient(url,function(err,client){
+				if(err){
+					console.log(err);
+					console.log('******************连接远程服务器出错*******************');
+					return res.json({resultCode:'2',info:'服务器繁忙，请稍后重试'});
+				}
+
+				async.auto({
+					qryPackage : function(callback){//查询套餐
+						var qrypackArgs = {};
+						qrypackArgs.entityname = 'new_jifei_package';
+				        qrypackArgs.filter = '[{"Logical":"or","Conditions":[{"Key":"new_jifei_packageid","Operator":"=","Value":"'+packageId+'"}]}]';
+				        qrypackArgs.fields = 'new_jifei_packageid,new_pack_name,new_pack_content,new_pack_pirce,createdon';
+			          	qrypackArgs.orderby = 'createdon desc';
+				        qrypackArgs.pagesize = 1;
+				        qrypackArgs.pageindex = 1;
+				        console.log(qrypackArgs);
+				        console.log('***************查询充值套餐开始*********************');
+				        client.Query(qrypackArgs,function(err,result){
+				        	if(err){
+				        		console.log(err);
+				        		return res.json({resultCode:'2',info:'服务器繁忙，请稍后重试'});
+				        	}
+				        	var off = null;
+				        	for(var a in result.QueryResult){
+				        		if(a){
+				        			off = true;
+				        		}
+				        	}
+				        	console.log(result);
+				        	if(off){	
+				        		var packageData = JSON.parse(result.QueryResult);
+				        		if(packageData.issuccess != undefined || packageData.issuccess == false){
+				        			res.json({resultCode:'1',info:'对不起，您选择的套餐不存在'});
+				        		}else{
+				        			callback(null,packageData);
+				        		}
+				        	}else{
+				        		res.json({resultCode:'1',info:'对不起，您选择的套餐不存在'});
+				        	}
+				        });
+					},
+					qryUser : ['qryPackage',function(callback,result){
+						var qryuserArgs = {};
+						qryuserArgs.entityname = 'new_jifei_customer';
+				        qryuserArgs.filter = '[{"Logical":"or","Conditions":[{"Key":"new_useraccount","Operator":"=","Value":"'+phone+'"}]}]';
+				        qryuserArgs.fields = 'new_jifei_customerid,createdon';
+			          	qryuserArgs.orderby = 'createdon desc';
+				        qryuserArgs.pagesize = 1;
+				        qryuserArgs.pageindex = 1;
+				        console.log(qryuserArgs);
+				        console.log('**************开始查询用户**********************');
+				        client.Query(qryuserArgs,function(err,result){
+				        	if(err){
+				        		console.log(err);
+				        		console.log('******************查询用户出错********************');
+				        		return res.json({resultCode:'2',info:'服务器繁忙，请稍后重试'});
+				        	}
+				        	var off = null;
+				        	for(var a in result.QueryResult){
+				        		if(a){
+				        			off = true;
+				        		}
+				        	}
+				        	console.log(result);
+				        	if(off){
+				        		var userData = JSON.parse(result.QueryResult);
+				        		if(userData.issuccess != undefined || userData.issuccess == false){
+				        			res.json({resultCode:'1',info:'对不起,您充值的帐号不存在'});
+				        		}else{
+				        			callback(null,userData);
+				        		}
+				        	}else{
+				        		res.json({resultCode:'1',info:'对不起,您充值的帐号不存在'});
+				        	}
+				        });
+					}],
+					createOrder : ['qryPackage','qryUser',function(callback,result){
+						var userData = result.qryUser[0];
+						var packageData = result.qryPackage[0];
+						var packPrice = parseFloat(packageData.new_pack_pirce);
+						var totalPrice = packPrice * num;
+						var tradeno = 'alipay'+Time.format(new Date(),'yyyyMMddHHmmss')+phone;
+						var createOrderArgs = {};
+						createOrderArgs.entityname ='new_jifei_alipay';
+            			createOrderArgs.data =  '[{"Key":"new_jifei_customerid","Value":"'+accountId+'"},'+
+            									'{"Key":"new_jifei_mobile","Value":"'+phone+'"},'+
+            									'{"Key":"new_jifei_packageid","Value":"'+packageData.new_pack_name+'"},'+
+            									'{"Key":"new_jifei_packagetempid","Value":"'+packageData.new_jifei_packageid+'"},'+//暂时使用该字段保存套餐id
+            									'{"Key":"new_jifei_ordersum","Value":"'+num+'"},'+
+            									'{"Key":"new_jifei_money","Value":"'+totalPrice+'"},'+
+            									'{"Key":"new_jifei_tradeno","Value":"'+tradeno+'"},'+
+            									'{"Key":"new_jifei_result","Value":"未付款"},'+
+            									'{"Key":"new_jifei_id","Value":"'+tradeno+'"}]';
+            			console.log(createOrderArgs);
+            			console.log('**********************保存到alipay记录表****************************');
+            			client.Create(createOrderArgs,function(err,result){
+            				if(err){
+            					console.log(err);
+				        		console.log('******************创建订单失败********************');
+				        		return res.json({resultCode:'2',info:'服务器繁忙，请稍后重试'});
+            				}
+            				var off = null;
+            				for(var a in result.CreateResult){
+            					if(a){
+            						off = true;
+            					}
+            				}
+            				console.log(result);
+            				if(off){	
+            					var createData = JSON.parse(result.CreateResult);
+            					if(createData.issuccess){
+            						console.log('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>alipay充值成功');
+            						var resuData = createData.extra;
+            						console.log(createData.extra.length);
+            						var resData = {};
+            						resData.out_trade_no = resuData[0].Value;
+            						resData.subject = packageData.new_pack_name;
+            						resData.total_fee = totalPrice + '';
+            						resData.recharge_mobile = phone + '';
+            						resData.recharge_count = num + '';
+            						resData.userId = userData.new_jifei_customerid;
+            						console.log(resData);
+            						res.json({resultCode:'0',info:'充值成功',data:resData});
+            					}else{
+            						res.json({resultCode:'2',info:'参数输入格式不对'});
+            					}
+            				}else{
+            					res.json({resultCode:'1',info:'充值失败,请稍候重试'});
+            				}
+            			});
+					}]
+				},function(err,results){
+
+				})
+			});
+		}else{
+			res.json({resultCode:'1',info:'请求参数不符合要求'});			
+		}
+	}catch(e){
+		console.log('>>>>>>>>>>>>>>>>发生了异常<<<<<<<<<<<<<<<<<');
+		console.log(e);
+		res.json({resultCode:'2',info:'服务器繁忙，请稍后重试'});
+	}
+}
+
+
+
+//根据套餐id查询套餐信息
+// exports.findPackage = function(req,res){
+// 	var data = req.body;
+// 	try{
+// 		var packageId = data.packageId;
+// 		if(!packageId || packageId == ''){
+// 			return res.json({resultCode:'1',info:'套餐id不能为空'});
+// 		}
+// 		var url = settings.url;
+// 		soap.createClient(url,function(err,client){
+// 			if(err){
+// 				console.log(err);
+// 				return res.json({resultCode:'2',info:'连接远程服务器出错'});
+// 			}
+// 			var args = {};
+// 	        args.entityname = 'new_jifei_package';
+// 	        args.filter = '[{"Logical":"or","Conditions":[{"Key":"new_jifei_packageid","Operator":"=","Value":"'+packageId+'"}]}]';
+// 	        args.fields = 'new_jifei_strategyid,new_pack_content,new_pack_name,new_pack_pirce,new_strategy_cdate,createdon';
+//           	args.orderby = 'createdon desc';
+// 	        args.pagesize = 1;
+// 	        args.pageindex = 1;
+// 	        soap.Query(args,function(err,result){
+// 	        	if(err){
+// 	        		console.log(err);
+// 	        		return res.json({resultCode:'2',info:'套餐查询失败,请稍后重试'});
+// 	        	}
+// 		        var off = null;
+// 	        	for(var a in result.QueryResult){
+// 	        		if(a){
+// 	        			off = true;
+// 	        		}
+// 	        	}
+// 	        	if(off){
+// 	        		var resultData = JSON.parse(result.QueryResult);
+// 	        		if(resultData.issuccess != undefined || resultData.issuccess == false){
+// 						return res.json({resultCode:'1',info:"参数错误"});
+// 	        		}  
+// 	        		res.json({resultCode:'0',data:resultData});
+// 	        	}else{
+// 	        		res.json({resultCode:'1',info:'该套餐不存在'});
+// 	        	}
+// 	        });
+// 		});
+// 	}catch(e){
+// 		console.log('>>>>>>>>>>>>>发生了异常<<<<<<<<<<<<');
+// 		console.log(e);
+// 		res.json({resultCode:'2',info:'服务器繁忙，请稍后重试'});
+// 	}
+// }
+

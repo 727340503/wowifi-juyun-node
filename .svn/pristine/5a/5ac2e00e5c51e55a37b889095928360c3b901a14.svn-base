@@ -1,0 +1,371 @@
+/*
+ * 该类主要用来做联通数据互通的方法的封装
+ */
+var Utils = require('./xrmUtil');
+var http = require('http');  
+var Time = require('../controller/time');
+//获取用户信息
+exports.getUserInfo = function(data,cb){
+    var client = data.client;
+    var retObj = {};
+    var args = {};
+    args.entityname = 'new_jifei_customer';
+    args.fields = 'new_useraccount,new_jifei_customerid,statecode';//createdon, 
+    args.filter = '[{"Key":"new_useraccount","Value":"'+data.STAFF_MOBILE+'"}]';
+    console.log(args)
+    client.Query(args,function(err,result){
+        if(err){
+            console.log(err);
+            console.log('*****************查询用户帐号信息出错********************');
+            cb({resultCode:2,msg:"查询帐号信息失败,请重试"});
+            return;
+        }
+        var off = null;
+        for(var a in result.QueryResult){
+            if(a){
+                off = true;
+            }
+        }
+        console.log('**********************查询帐号信息结果*******************');
+        console.log(result);
+        if(off){
+            var userData = JSON.parse(result.QueryResult);
+            if(userData.issuccess != undefined || userData.issuccess == false){
+               cb({resultCode:1,msg:"用户帐号信息不存在"}); 
+            }else{
+            	cb({resultCode:0,data:userData[0]});
+            }
+        }else{
+            cb({resultCode:1,msg:"用户帐号信息不存在"});
+        }
+    });
+}
+
+
+//创建用户
+exports.createUser = function(data,cb){
+	var client = data.client;
+	var userAccount = data.user;
+	var factoryId = data.factoryId;
+	var STAFF_MOBILE = data.STAFF_MOBILE;
+	var retObj = {};//返回的对象
+	var args = {};
+	args.entityname = 'new_jifei_customer';
+	args.data = '['+
+	            '{"Key":"new_useraccount","Value":"'+userAccount+'"},'+
+	            '{"Key":"new_jifei_factoryid","Value":"'+factoryId+'"},'+
+	            '{"Key":"new_userphone","Value":"'+STAFF_MOBILE+'"},'+
+	            '{"Key":"new_username","Value":"'+STAFF_MOBILE+'"},'+
+	            '{"Key":"new_userfullname","Value":"'+STAFF_MOBILE+'"},'+
+	            '{"Key":"new_userpssword","Value":"123456"},'+
+	            '{"Key":"new_userpssword2","Value":"123456"},'+
+	            // '{"Key":"new_updatetime","Value":"'+req.body.TIMESTAMP+'"},'+
+	            ']';
+	console.log(args);
+	console.log('***********************开始创建用户*******************');
+	client.Create(args,function(err,result){
+		if(err){
+			console.log(err);
+			console.log('********************创建用户出错***********************');
+			cb({resultCode:2,msg:"新增用户失败,请重试"});
+			return;
+		}
+		var off = null;
+		for(var a in result.CreateResult){
+			if(a){
+				off = true;
+				break;
+			}
+		}
+		console.log('****************创建用户返回的结果*******************');
+		console.log(result);
+		if(off){
+			var createData = JSON.parse(result.CreateResult);
+			if(createData.issuccess){
+				console.log('************新增用户成功*******************');
+				//38帐号创建完成后创建29服务器帐号
+				var user29Data = {};
+				user29Data.phone = userAccount;
+				create29User(user29Data);
+				cb({resultCode:0,new_jifei_customerid:createData.extra[0].Value});
+			}else{
+				console.log('************新增用户失败*******************');
+				cb({resultCode:1,msg:"新增用户失败,请重试"});
+			}
+		}else{
+			cb({resultCode:1,msg:"新增用户失败,请重试"});
+		}
+	});
+}
+
+
+//查询用户订单
+exports.qryOrder = function(data,cb){
+	var client = data.client;
+	var userId = data.userId;
+	var args = {};
+	args.entityname = "new_jifei_order";
+    args.filter = '[{"Key":"new_jifei_customerid","Value":"'+userId+'"}]';
+	args.fields = 'new_jifei_orderid,new_jifei_begintime,new_jifei_endtime,createdon';
+	console.log(args);
+	console.log('****************开始查询用户订单****************');
+	client.Query(args,function(err,result){
+		if(err){
+			console.log(err);
+			console.log('******************查询用户订单出错*********************');
+			cb({resultCode:2,msg:"查询用户订单失败,请重试"});
+			return;
+		}
+		var off = null;
+		for(var a in result.QueryResult){
+			if(a){
+				off = true;
+				break;
+			}
+		}
+		console.log('*************************用户订单查询结果****************************');
+		// console.log(result);
+		if(off){
+			var orderData = JSON.parse(result.QueryResult);
+			if(orderData.issuccess != undefined || orderData.issuccess){
+				cb({resultCode:1,msg:"用户暂时没有订单信息"});
+			}else{
+				cb({resultCode:0,data:orderData[0]});
+			}
+		}else{
+			cb({resultCode:1,msg:"用户暂时没有订单信息"});
+		}
+	}); 
+}
+
+
+//插入联通订单记录表(同时记录保存到订单总表中)
+exports.createLTOrder = function(data,cb){
+	var client = data.client;
+	var client2 = data.client2;
+	var userId = data.userId;
+	var month = 1;//暂时确定只有月套餐
+	var num = data.num;//总数量
+	var mobile = data.mobile;
+	var factoryId = data.factoryId;
+	var price = data.price;
+	//计算用户的订单失效时间
+	var beginTime = Time.format(new Date(data.endTime).toLocaleString(),'yyyy-MM-dd HH:mm:ss');
+	var orderSumBeginTime = Time.format(new Date(data.endTime).toLocaleString(),'yyyy-MM-dd HH:mm:ss');
+	var now = new Date().getTime();
+	var endtime = new Date(data.endTime).getTime();
+	if(now >= endtime){
+		endTime = now;
+		beginTime = Time.format(new Date(now).toLocaleString(),'yyyy-MM-dd HH:mm:ss');
+		//将订单总表的开始时间定位当前时间
+		orderSumBeginTime = Time.format(new Date(now).toLocaleString(),'yyyy-MM-dd HH:mm:ss');
+	}
+	endTime = new Date(endTime);
+	var endTime1 = new Date(endTime.getFullYear(), (endTime.getMonth()) + month*num, endTime.getDate(), endTime.getHours(), endTime.getMinutes(), endTime.getSeconds());
+	var endDate = Time.format(endTime1.toLocaleString(),'yyyy-MM-dd HH:mm:ss');
+	//用户的订单失效时间计算完毕
+	var args = {};
+	args.entityname = "new_ltorder";
+	args.data = '['+
+	            '{"Key":"new_jifei_customerid","Value":"'+userId+'"},'+
+	            '{"Key":"new_jifei_ordersum","Value":"'+num+'"},'+
+	            '{"Key":"new_jifei_packageid","Value":"B304A62D-C7FE-E411-9D79-C81F66BF2DD0"},'+//套餐固定的月套餐暂时写死
+	            '{"Key":"new_name","Value":"'+mobile+'"},'+//充值号码
+	            '{"Key":"new_jifei_result","Value":"success"},'+
+	            '{"Key":"new_jifei_validtime","Value":"'+endDate+'"},'+
+	            '{"Key":"new_jifei_money","Value":"'+price*num+'"},'+
+	            '{"Key":"new_jifei_addtime","Value":"'+beginTime+'"},'+
+	            ']';
+	console.log(args);
+	client.Create(args,function(err,result){
+		if(err){
+			console.log(err);
+			console.log('********************创建联通订单失败******************');
+			return false;
+		}
+		var off = null;
+		for(var a in result.CreateResult){
+			if(a){
+				off = true;
+				break;
+			}
+		}
+		console.log('***********************创建联通订单返回的结果***********************');
+		console.log(result);
+		if(off){
+			var createLTData = JSON.parse(result.CreateResult);
+			if(createLTData.issuccess){
+				var createOrderData = {};
+        		createOrderData.client = client2;
+				createOrderData.new_jife_from = 4;//联通同步数据来源的代码
+				createOrderData.new_jifei_customerid = userId;
+				createOrderData.new_jifei_factoryid = factoryId;
+				createOrderData.new_jifei_begintime = orderSumBeginTime;
+				createOrderData.new_jifei_endtime = endDate;
+				createOrderData.new_jifei_fromid = createLTData.extra[0].Value;
+				createOrderData.new_jifei_orderamount = price*num;
+				createOrderData.new_jifei_ordersum = num;//购买数量
+				createOrderData.new_pay = 3;//联通同步数据的代码
+				createOrderData.new_jifei_packageid = 'B304A62D-C7FE-E411-9D79-C81F66BF2DD0';
+				Utils.createOrderSum2(createOrderData,function(flag){
+					cb(flag);
+				});
+			}else{
+				return false;
+			}
+		}else{
+			return false;
+		}
+	});
+
+}
+
+//创建一条失效的订单
+exports.createInvalidOrder = function(data,cb){
+	var client = data.client;
+	var num = data.num;
+	var money = data.money;
+	var retObj = {};
+	var now = new Date();
+	var endDate = new Date(now.getFullYear(), now.getMonth(), (now.getDate())-1, now.getHours(), now.getMinutes(), now.getSeconds());  
+	var endTime = Time.format(endDate.toLocaleString(),'yyyy-MM-dd HH:mm:ss');
+	var args = {};
+	args.entityname = "new_jifei_order";
+	args.data = '[{"Key":"new_jifei_customerid","Value":"'+userId+'"},'+
+						'{"Key":"new_jifei_orderamount","Value":"'+money+'"},'+
+						'{"Key":"new_jifei_ordersum","Value":"'+num+'"},'+//订购数量
+						'{"Key":"new_jifei_taketype","Value":"0"},'+
+						'{"Key":"new_jifei_begintime","Value":"'+endTime+'"},'+
+						'{"Key":"new_jifei_endtime","Value":"'+endTime+'"}]';
+    client.Create(args,function(err,result){
+    	if(err){
+    		console.log(err);
+    		console.log('******************插入失效订单失败*******************');
+    		cb({resultCode:2,msg:"插入订单失败，请稍候重试"});
+    		return;
+    	}
+    	var off = null;
+    	for(var a in result.CreateResult){
+    		if(a){
+    			off = true;
+    			break;
+    		}
+    	}
+    	console.log('********************插入失效订单返回结果**********************8');
+    	console.log(result);
+    	if(off){
+    		var createOrderData = JSON.parse(result.CreateResult);
+    		if(createOrderData.issuccess){
+    			cb({resultCode:0,msg:"插入订单成功",data:{new_jifei_endtime:endTime}});
+    		}else{
+    			cb({resultCode:1,msg:"插入订单失败，请稍候重试"});
+    		}
+    	}else{
+    		cb({resultCode:1,msg:"插入订单失败，请稍候重试"});
+    	}
+    });
+}
+
+//更新用户订单为失效状态
+exports.updOrderTime = function(data,cb){
+	var client = data.client;
+	var orderId = data.orderId;
+	var endTime = data.endTime;
+	var args = {};
+	args.entityname = "new_jifei_order";
+	args.data = '['+
+				'{"Key":"new_jifei_orderid","Value":"'+orderId+'"},'+
+				'{"Key":"new_jifei_endtime","Value":"'+endTime+'"}'+
+				']';
+	client.Update(args,function(err,result){
+		if(err){
+			console.log(err);
+			console.log('****************修改订单时间出错*****************8');
+			cb(false);
+			return;
+		}
+		var off = null;
+		for(var a in result.UpdateResult){
+			if(a){
+				off = true;
+				break;
+			}
+		}
+		console.log('*****************更新订单状态的返回结果*****************8');
+		console.log(result);
+		if(off){
+			var updOrderData = JSON.parse(result.UpdateResult);
+			if(updOrderData.issuccess){
+				cb(true);
+			}else{
+				cb(false);
+			}
+		}else{
+			cb(false);
+		}
+	});
+}
+
+
+//创建29服务器帐号
+function create29User(data){
+	console.log('*****************创建29服务器帐号*****************');
+	var options = {  
+	    hostname: '112.84.178.29',  
+	    port: 86,  
+	    path: '/restful/register.aspx?phone='+data.phone+'&password=123456&qudao=',  
+	    method: 'GET'  
+	};  
+	  
+	var req = http.request(options, function (res) {  
+	    console.log('STATUS: ' + res.statusCode);  
+	    console.log('HEADERS: ' + JSON.stringify(res.headers));  
+	    res.setEncoding('utf8');  
+	    res.on('data', function (chunk) {  
+	        console.log('BODY: ' + chunk);  
+	    });  
+	});  
+	  
+	req.on('error', function (e) {  
+	    console.log('problem with request: ' + e.message);  
+	});  
+	  
+	req.end(); 
+}
+
+exports.editUserState(data,cb){
+	var userInfoObj = data.userInfoObj;
+	var state = data.state;
+	var updUserArgs = {};
+    updUserArgs.entityname ='new_jifei_customer';
+    updUserArgs.data = '[{"Key":"new_jifei_customerid","Value":"'+userInfoObj.new_jifei_customerid+'"},'+
+                        '{"Key":"new_statecode","Value":"1"}]';//修改用户状态的字段
+    console.log(updUserArgs);
+    client2.Update(updUserArgs,function(err,result){
+        if(err){
+            console.log(err);
+            console.log('*****************修改用户状态出错*****************8');
+            cb(false);
+        }
+        var off = null;
+        for(var a in result.UpdateResult){
+            if(a){
+                off = true;
+                break;
+            }
+        }
+        if(off){
+        	var updData = JSON.parse(result.UpdateResult);
+            if(updData.issuccess){
+            	console.log('********************修改用户状态成功*******************');
+				cb(true);
+            }else{
+            	console.log('********************修改用户状态失败*******************');
+				cb(false);
+            }
+        }else{
+        	console.log('********************修改用户状态失败*******************');
+			cb(false);
+        }
+    });
+}
